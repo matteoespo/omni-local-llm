@@ -43,3 +43,23 @@ class LlamaCPPAdapter(LLMBackend):
             return generator()
         else:
             return response['choices'][0]['message']['content']
+
+    async def achat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, **kwargs):
+        import asyncio
+        
+        sync_result = await asyncio.to_thread(
+            self.chat, model_name, messages, stream=stream, json_mode=json_mode, **kwargs
+        )
+        
+        if stream:
+            async def async_generator():
+                loop = asyncio.get_running_loop()
+                while True:
+                    try:
+                        chunk = await loop.run_in_executor(None, next, sync_result)
+                        yield chunk
+                    except StopIteration:
+                        break
+            return async_generator()
+        else:
+            return sync_result

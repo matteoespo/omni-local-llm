@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional
 import json
 import time
 
@@ -42,7 +42,7 @@ async def chat_completions(request: ChatCompletionRequest):
         json_mode = True
 
     try:
-        response = manager.chat(
+        response = await manager.achat(
             backend=backend,
             model=model_name,
             messages=messages_dict,
@@ -56,8 +56,8 @@ async def chat_completions(request: ChatCompletionRequest):
     created_time = int(time.time())
 
     if request.stream:
-        def stream_generator():
-            for chunk in response:
+        async def stream_generator():
+            async for chunk in response:
                 chunk_data = {
                     "id": "chatcmpl-123",
                     "object": "chat.completion.chunk",
