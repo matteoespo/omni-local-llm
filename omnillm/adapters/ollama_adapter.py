@@ -15,8 +15,15 @@ class OllamaAdapter(LLMBackend):
             else:
                 raise e
 
-    def chat(self, model_name: str, messages: list, **kwargs) -> str:
+    def chat(self, model_name: str, messages: list, stream: bool = False, **kwargs):
         self.pull_model(model_name) 
         print(f"[omnillm -> Ollama] Generating response...")
-        response = ollama.chat(model=model_name, messages=messages)
-        return response['message']['content']
+        response = ollama.chat(model=model_name, messages=messages, stream=stream)
+        
+        if stream:
+            def generator():
+                for chunk in response:
+                    yield chunk['message'].get('content', '')
+            return generator()
+        else:
+            return response['message']['content']
