@@ -15,13 +15,15 @@ class OllamaAdapter(LLMBackend):
             else:
                 raise e
 
-    def chat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, **kwargs):
+    def chat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         self.pull_model(model_name) 
         print("[omnillm -> Ollama] Generating response...")
         
         chat_kwargs = {"model": model_name, "messages": messages, "stream": stream}
         if json_mode:
             chat_kwargs["format"] = "json"
+        if tools:
+            chat_kwargs["tools"] = tools
             
         response = ollama.chat(**chat_kwargs)
         
@@ -31,9 +33,14 @@ class OllamaAdapter(LLMBackend):
                     yield chunk['message'].get('content', '')
             return generator()
         else:
-            return response['message']['content']
+            if tools:
+                return {
+                    "content": response['message'].get('content', ''),
+                    "tool_calls": response['message'].get('tool_calls', [])
+                }
+            return response['message'].get('content', '') or ''
 
-    async def achat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, **kwargs):
+    async def achat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         import asyncio
         from ollama import AsyncClient
         
@@ -44,6 +51,8 @@ class OllamaAdapter(LLMBackend):
         chat_kwargs = {"model": model_name, "messages": messages, "stream": stream}
         if json_mode:
             chat_kwargs["format"] = "json"
+        if tools:
+            chat_kwargs["tools"] = tools
             
         response = await client.chat(**chat_kwargs)
         
@@ -53,4 +62,9 @@ class OllamaAdapter(LLMBackend):
                     yield chunk['message'].get('content', '')
             return async_generator()
         else:
-            return response['message']['content']
+            if tools:
+                return {
+                    "content": response['message'].get('content', ''),
+                    "tool_calls": response['message'].get('tool_calls', [])
+                }
+            return response['message'].get('content', '') or ''

@@ -12,10 +12,9 @@ class LlamaCPPAdapter(LLMBackend):
         local_path = hf_hub_download(repo_id=model_name, filename=kwargs.get("filename"))
         return local_path
 
-    def chat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, **kwargs):
+    def chat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         local_model_path = self.pull_model(model_name, **kwargs)
         
-        # only load if it's a new model
         if self.active_model_name != model_name:
             print(f"[omnillm -> llama.cpp] Loading '{model_name}' into RAM/VRAM...")
             
@@ -31,6 +30,8 @@ class LlamaCPPAdapter(LLMBackend):
         chat_kwargs = {"messages": messages, "stream": stream}
         if json_mode:
             chat_kwargs["response_format"] = {"type": "json_object"}
+        if tools:
+            chat_kwargs["tools"] = tools
             
         response = self.llm_instance.create_chat_completion(**chat_kwargs)
         
@@ -38,17 +39,23 @@ class LlamaCPPAdapter(LLMBackend):
             def generator():
                 for chunk in response:
                     delta = chunk['choices'][0].get('delta', {})
-                    if 'content' in delta:
+                    if 'content' in delta and delta['content'] is not None:
                         yield delta['content']
             return generator()
         else:
-            return response['choices'][0]['message']['content']
+            msg = response['choices'][0]['message']
+            if tools:
+                return {
+                    "content": msg.get('content', '') or '',
+                    "tool_calls": msg.get('tool_calls', [])
+                }
+            return msg.get('content', '') or ''
 
-    async def achat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, **kwargs):
+    async def achat(self, model_name: str, messages: list, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         import asyncio
         
         sync_result = await asyncio.to_thread(
-            self.chat, model_name, messages, stream=stream, json_mode=json_mode, **kwargs
+            self.chat, model_name, messages, stream=stream, json_mode=json_mode, tools=tools, **kwargs
         )
         
         if stream:

@@ -9,9 +9,9 @@ class ChatSession:
         if system_prompt:
             self.messages.append({"role": "system", "content": system_prompt})
 
-    def send(self, user_input: str, stream: bool = False, json_mode: bool = False, **kwargs):
+    def send(self, user_input: str, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         self.messages.append({"role": "user", "content": user_input})
-        response = self.manager.chat(self.backend, self.model, self.messages, stream=stream, json_mode=json_mode, **kwargs)
+        response = self.manager.chat(self.backend, self.model, self.messages, stream=stream, json_mode=json_mode, tools=tools, **kwargs)
         
         if stream:
             def stream_wrapper():
@@ -22,12 +22,19 @@ class ChatSession:
                 self.messages.append({"role": "assistant", "content": full_content})
             return stream_wrapper()
         else:
-            self.messages.append({"role": "assistant", "content": response})
+            if isinstance(response, dict) and "tool_calls" in response:
+                self.messages.append({
+                    "role": "assistant", 
+                    "content": response.get("content", ""),
+                    "tool_calls": response.get("tool_calls")
+                })
+            else:
+                self.messages.append({"role": "assistant", "content": response})
             return response
 
-    async def asend(self, user_input: str, stream: bool = False, json_mode: bool = False, **kwargs):
+    async def asend(self, user_input: str, stream: bool = False, json_mode: bool = False, tools: list = None, **kwargs):
         self.messages.append({"role": "user", "content": user_input})
-        response = await self.manager.achat(self.backend, self.model, self.messages, stream=stream, json_mode=json_mode, **kwargs)
+        response = await self.manager.achat(self.backend, self.model, self.messages, stream=stream, json_mode=json_mode, tools=tools, **kwargs)
         
         if stream:
             async def async_stream_wrapper():
@@ -38,5 +45,12 @@ class ChatSession:
                 self.messages.append({"role": "assistant", "content": full_content})
             return async_stream_wrapper()
         else:
-            self.messages.append({"role": "assistant", "content": response})
+            if isinstance(response, dict) and "tool_calls" in response:
+                self.messages.append({
+                    "role": "assistant", 
+                    "content": response.get("content", ""),
+                    "tool_calls": response.get("tool_calls")
+                })
+            else:
+                self.messages.append({"role": "assistant", "content": response})
             return response

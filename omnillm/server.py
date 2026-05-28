@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import json
 import time
 
@@ -12,7 +12,9 @@ manager = LocalLLMManager()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
 
 class ResponseFormat(BaseModel):
     type: str
@@ -23,6 +25,7 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     response_format: Optional[ResponseFormat] = None
     temperature: Optional[float] = 0.7
+    tools: Optional[List[Dict[str, Any]]] = None
 
 def parse_model_string(model_string: str):
     """Parses 'backend/model_name' into backend and model. Defaults to ollama."""
@@ -35,7 +38,16 @@ def parse_model_string(model_string: str):
 async def chat_completions(request: ChatCompletionRequest):
     backend, model_name = parse_model_string(request.model)
     
-    messages_dict = [{"role": m.role, "content": m.content} for m in request.messages]
+    messages_dict = []
+    for m in request.messages:
+        d = {"role": m.role}
+        if m.content is not None:
+            d["content"] = m.content
+        if m.tool_calls is not None:
+            d["tool_calls"] = m.tool_calls
+        if m.tool_call_id is not None:
+            d["tool_call_id"] = m.tool_call_id
+        messages_dict.append(d)
     
     json_mode = False
     if request.response_format and request.response_format.type == "json_object":
@@ -48,6 +60,7 @@ async def chat_completions(request: ChatCompletionRequest):
             messages=messages_dict,
             stream=request.stream,
             json_mode=json_mode,
+            tools=request.tools,
             temperature=request.temperature
         )
     except Exception as e:
@@ -77,6 +90,14 @@ async def chat_completions(request: ChatCompletionRequest):
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
     else:
+        message_dict = {"role": "assistant"}
+        if isinstance(response, dict):
+            message_dict["content"] = response.get("content", "")
+            if response.get("tool_calls"):
+                message_dict["tool_calls"] = response["tool_calls"]
+        else:
+            message_dict["content"] = response
+
         return {
             "id": "chatcmpl-123",
             "object": "chat.completion",
@@ -85,11 +106,8 @@ async def chat_completions(request: ChatCompletionRequest):
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response
-                    },
-                    "finish_reason": "stop"
+                    "message": message_dict,
+                    "finish_reason": "tool_calls" if message_dict.get("tool_calls") else "stop"
                 }
             ],
             "usage": {
