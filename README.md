@@ -38,7 +38,8 @@
 | **Multi-Backend** | Swap between [Ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggerganov/llama.cpp) with a single parameter change |
 | **Vision & Multimodal** | Native image understanding across Ollama and llama.cpp (file paths, bytes, data URIs, and OpenAI format) |
 | **Evaluation & Benchmarking** | Measure TTFT, tokens/sec, schema compliance, tool-calling precision, and needle-in-haystack context retrieval |
-| **Unified CLI** | Dedicated binary `omnillm` with `chat`, `run`, `models`, `bench`, `eval`, and `serve` commands |
+| **Unified CLI** | Dedicated binary `omnillm` with `chat`, `run`, `models`, `bench`, `eval`, `fit`, and `serve` commands |
+| **Hardware Auto-Fit** | Auto-detect host RAM, CUDA VRAM, and Apple Silicon Metal memory to calculate exact model fit and recommend optimal quantization (`omnillm fit`) |
 | **Chat Sessions & Pruning** | Resilient turn commits, sliding-window turn pruning, token budget enforcement, and thread-safe resets |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling & Agents** | Autonomous function execution loop (`@tool` decorator & `session.act`) |
@@ -114,8 +115,9 @@ response = manager.chat(
 | [`omnillm/core/session.py`](omnillm/core/session.py) | `ChatSession` — conversation state, streaming, tool calls |
 | [`omnillm/adapters/ollama_adapter.py`](omnillm/adapters/ollama_adapter.py) | Ollama integration via official Python client |
 | [`omnillm/adapters/llamacpp_adapter.py`](omnillm/adapters/llamacpp_adapter.py) | llama.cpp integration + automatic GGUF model caching |
+| [`omnillm/core/hardware.py`](omnillm/core/hardware.py) | Hardware auto-detection, memory estimation, and quantization recommender |
 | [`omnillm/server.py`](omnillm/server.py) | OpenAI-compatible FastAPI HTTP server |
-| [`omnillm/__main__.py`](omnillm/__main__.py) | Interactive CLI chat interface |
+| [`omnillm/__main__.py`](omnillm/__main__.py) | Interactive CLI chat, benchmark, and evaluation interface |
 
 ---
 
@@ -412,6 +414,94 @@ omnillm eval --backend ollama --model llama3 --needle
 
 # 6. Start the OpenAI-compatible FastAPI server
 omnillm serve --host 127.0.0.1 --port 8000
+
+# 7. Hardware auto-detection and smart fit quantization recommender
+omnillm fit
+omnillm fit llama-3.1-8b --context 8192
+omnillm fit mistral:7b --json
+```
+
+---
+
+### Hardware Auto-Detection & Smart Fit Quantization
+
+Never guess whether a model will fit into your VRAM or RAM again. Omni-Local-LLM inspects host RAM, Apple Silicon Metal unified memory, and NVIDIA CUDA VRAM, computing exact model weights, KV cache overhead, and runtime buffers to recommend the highest quality quantization (`FP16`, `Q8_0`, `Q6_K`, `Q5_K_M`, `Q4_K_M`, `Q3_K_M`, `Q2_K`).
+
+#### 1. CLI Hardware Profiling & Recommendation
+
+Run `omnillm fit` without arguments to see your machine's hardware profile and a model compatibility matrix:
+
+```bash
+omnillm fit
+```
+
+Output:
+```
+🖥️  Detected Hardware Profile
+------------------------------------------------------------------------------
+OS:           Linux 6.8.0-142-generic (x86_64, 12 CPUs)
+System RAM:   14.96 GB Total (3.26 GB Available)
+GPU:          NVIDIA GeForce GTX 1650 (4.00 GB VRAM, 3.62 GB Free)
+------------------------------------------------------------------------------
+
+🚀 Model Compatibility Matrix for Your Machine:
+MODEL                SIZE     FIT TARGET                 QUANT      EST. RAM
+------------------------------------------------------------------------------
+smollm:135m          0.135B   ✅ GPU (Full Offload)       Q8_0       0.69 GB
+llama-3.2:1b         1.0B     ✅ GPU (Full Offload)       Q8_0       1.60 GB
+llama-3.2:3b         3.0B     ✅ GPU (Full Offload)       Q8_0       3.74 GB
+phi-3-mini:3.8b      3.8B     ✅ GPU (Full Offload)       Q5_K_M     3.30 GB
+mistral:7b           7.0B     ✅ GPU (Full Offload)       Q2_K       3.50 GB
+llama-3.1:8b         8.0B     ⚠️ CPU / System RAM        Q4_K_M     5.54 GB
+deepseek-r1:14b      14.0B    ⚠️ CPU / System RAM        Q4_K_M     9.39 GB
+qwen2.5:32b          32.0B    ❌ Insufficient Memory      N/A        0.00 GB
+llama-3.3:70b        70.0B    ❌ Insufficient Memory      N/A        0.00 GB
+```
+
+Analyze a specific model and context window:
+
+```bash
+omnillm fit llama-3.1-8b --context 8192
+```
+
+```
+🧠 Model Fit Analysis: llama-3.1-8b (~8.0B params, 8,192 context)
+------------------------------------------------------------------------------
+QUANT     SIZE (GB)   FIT STATUS               QUALITY                SPEED
+------------------------------------------------------------------------------
+FP16      17.40 GB    ❌ Insufficient Memory    Maximum (Lossless)     OOM
+Q8_0       9.80 GB    ⚠️ CPU / System RAM      Near Lossless (~99.5%) Moderate / Slow (CPU Compute)
+Q6_K       7.96 GB    ⚠️ CPU / System RAM      Extremely High (>99%)  Moderate / Slow (CPU Compute)
+Q5_K_M     7.00 GB    ⚠️ CPU / System RAM      High Sweet-Spot (~98%) Moderate / Slow (CPU Compute)
+Q4_K_M     6.04 GB    ⚠️ CPU / System RAM      Recommended Standard   Moderate / Slow (CPU Compute)
+Q3_K_M     5.24 GB    ⚠️ CPU / System RAM      Noticeable Degradation Moderate / Slow (CPU Compute)
+Q2_K       4.44 GB    ⚠️ CPU / System RAM      High Perplexity Loss   Moderate / Slow (CPU Compute)
+------------------------------------------------------------------------------
+
+💡 Recommendation:
+   Recommended: Q4_K_M on CPU / System RAM (~6.04 GB). Exceeds GPU VRAM; will run using CPU RAM.
+   💡 Tip: For full GPU acceleration, try a smaller model (e.g., 3B or 1B) to fit within your 4.0 GB VRAM.
+```
+
+#### 2. Python SDK
+
+```python
+from omnillm import detect_hardware, recommend_model_fit, estimate_model_memory
+
+# Inspect host hardware
+hw = detect_hardware()
+print(hw.summary())
+# "OS: Linux (x86_64, 12 CPUs) | RAM: 15.0 GB Total | GPU: NVIDIA GeForce GTX 1650 (4.0 GB VRAM)"
+
+# Evaluate model fit
+fit = recommend_model_fit("llama-3.2-3b", context_length=4096)
+if fit.can_fit:
+    print(f"Optimal Quantization: {fit.recommended_quant}")
+    print(f"Target: {fit.best_target}")
+
+# Estimate memory for any model size & quant
+total_gb, weights_gb, kv_cache_gb = estimate_model_memory(param_count_b=70.0, quant="Q4_K_M", context_length=16384)
+print(f"70B Q4_K_M @ 16K context requires ~{total_gb:.1f} GB memory")
 ```
 
 ---

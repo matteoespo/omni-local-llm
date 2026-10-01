@@ -226,6 +226,74 @@ def _handle_serve(args: argparse.Namespace, manager: LocalLLMManager) -> None:
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def _handle_fit(args: argparse.Namespace) -> None:
+    from omnillm.core.hardware import (
+        detect_hardware,
+        recommend_model_fit,
+        suggest_models_for_hardware,
+    )
+
+    hardware = detect_hardware()
+
+    if not args.model:
+        suggestions = suggest_models_for_hardware(hardware)
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "hardware": hardware.to_dict(),
+                        "suggestions": suggestions,
+                    },
+                    indent=2,
+                )
+            )
+            return
+
+        print("🖥️  Detected Hardware Profile")
+        print("-" * 78)
+        print(
+            f"OS:           {hardware.os_name} {hardware.os_release} ({hardware.architecture}, {hardware.cpu_count} CPUs)"
+        )
+        print(f"System RAM:   {hardware.total_ram_gb:.2f} GB Total ({hardware.available_ram_gb:.2f} GB Available)")
+        if hardware.has_cuda and hardware.gpu_name:
+            print(
+                f"GPU:          {hardware.gpu_name} ({hardware.total_vram_gb:.2f} GB VRAM, {hardware.free_vram_gb:.2f} GB Free)"
+            )
+        elif hardware.is_apple_silicon:
+            print(f"GPU:          {hardware.gpu_name or 'Apple Silicon Metal'} (Unified Memory Architecture)")
+        else:
+            print("Accelerator:  CPU Only (No dedicated GPU detected)")
+        print("-" * 78)
+        print("\n🚀 Model Compatibility Matrix for Your Machine:")
+        print(f"{'MODEL':<20} {'SIZE':<8} {'FIT TARGET':<26} {'QUANT':<10} {'EST. RAM'}")
+        print("-" * 78)
+        for s in suggestions:
+            target_str = str(s["target"])
+            icon = (
+                "✅"
+                if s["can_fit"] and ("GPU" in target_str or "Metal" in target_str)
+                else ("⚠️" if s["can_fit"] else "❌")
+            )
+            print(
+                f"{s['model']:<20} {s['params']:<8} {icon + ' ' + target_str:<26} {s['recommended_quant'] or 'N/A':<10} {s['required_gb']:.2f} GB"
+            )
+        print("-" * 78)
+        print("\n💡 Tip: Run 'omnillm fit <model_name>' for a detailed breakdown of a specific model.")
+        return
+
+    rec = recommend_model_fit(
+        model_name=args.model,
+        context_length=args.context,
+        param_count_b=args.params,
+        hardware=hardware,
+    )
+
+    if args.json:
+        print(json.dumps(rec.to_dict(), indent=2))
+    else:
+        print("\n" + rec.format_table() + "\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="omnillm",
@@ -283,6 +351,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve_p.add_argument("--host", default="127.0.0.1", help="Host address")
     serve_p.add_argument("--port", type=int, default=8000, help="Port number")
 
+    # 7. Fit (Hardware & Quantization Recommender)
+    fit_p = subparsers.add_parser("fit", help="Auto-detect hardware and recommend optimal model quantization")
+    fit_p.add_argument(
+        "model",
+        nargs="?",
+        default=None,
+        help="Model name or alias to evaluate (e.g. 'llama-3.1-8b', 'mistral:7b')",
+    )
+    fit_p.add_argument("--context", type=int, default=4096, help="Context window token size (default: 4096)")
+    fit_p.add_argument("--params", type=float, help="Explicit parameter count in billions (overrides auto-detection)")
+    fit_p.add_argument("--json", action="store_true", help="Output raw JSON analysis")
+
     # Top-level fallback arguments for backwards compatibility (e.g. `python -m omnillm --model llama3`)
     parser.add_argument("--backend", default="ollama", help=argparse.SUPPRESS)
     parser.add_argument("--model", help=argparse.SUPPRESS)
@@ -313,6 +393,8 @@ def main() -> None:
         _handle_eval(args, manager)
     elif args.subcommand == "serve":
         _handle_serve(args, manager)
+    elif args.subcommand == "fit":
+        _handle_fit(args)
     else:
         # Fallback to chat if --model was provided at top-level
         if getattr(args, "model", None):

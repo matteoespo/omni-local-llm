@@ -49,6 +49,12 @@ def test_build_parser_subcommands():
     assert args.subcommand == "serve"
     assert args.port == 9000
 
+    # Fit
+    args = parser.parse_args(["fit", "llama-3.1-8b", "--context", "8192"])
+    assert args.subcommand == "fit"
+    assert args.model == "llama-3.1-8b"
+    assert args.context == 8192
+
 
 def test_cli_handle_run(capsys):
     backend = RecordingBackend(response=ChatResponse(content="One-shot response"))
@@ -138,6 +144,37 @@ def test_cli_handle_eval(capsys):
     assert "PASS" in captured.out
 
 
+def test_cli_handle_fit_with_model(capsys):
+    from omnillm.__main__ import _handle_fit
+
+    args = argparse.Namespace(
+        model="llama-3.2-3b",
+        context=4096,
+        params=None,
+        json=False,
+    )
+    _handle_fit(args)
+    captured = capsys.readouterr()
+    assert "llama-3.2-3b" in captured.out
+    assert "Detected Hardware Profile" in captured.out
+    assert "QUANT" in captured.out
+
+
+def test_cli_handle_fit_matrix(capsys):
+    from omnillm.__main__ import _handle_fit
+
+    args = argparse.Namespace(
+        model=None,
+        context=4096,
+        params=None,
+        json=False,
+    )
+    _handle_fit(args)
+    captured = capsys.readouterr()
+    assert "Model Compatibility Matrix" in captured.out
+    assert "smollm:135m" in captured.out
+
+
 def test_cli_main_help_output(capsys):
     with patch.object(sys, "argv", ["omnillm"]):
         main()
@@ -145,3 +182,4 @@ def test_cli_main_help_output(capsys):
     assert "Omni-Local-LLM" in captured.out
     assert "chat" in captured.out
     assert "bench" in captured.out
+    assert "fit" in captured.out
