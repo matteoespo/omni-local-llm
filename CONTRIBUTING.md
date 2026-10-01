@@ -86,6 +86,9 @@ To add support for a new inference backend (e.g., `vllm`, `llamafile`, `koboldcp
    - `pull_model()` — download/verify the model
    - `chat()` — synchronous inference
    - `achat()` — asynchronous inference
+   - `embed()` — synchronous vector embeddings (optional, if backend supports embeddings)
+   - `aembed()` — asynchronous vector embeddings
+   - `list_models()` — list available local models
 3. **Register the adapter** in the `LocalLLMManager` constructor in [`omnillm/core/manager.py`](omnillm/core/manager.py).
 4. **Add tests** under `tests/` using mocks (see existing tests for patterns).
 5. **Update the README** to mention the new backend.

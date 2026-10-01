@@ -59,3 +59,53 @@ def test_manager_validates_adapter_capabilities():
 
     with pytest.raises(UnsupportedFeatureError):
         manager.chat("fake", "test", [], tools=[{"type": "function"}])
+
+
+def test_manager_embed_normalizes_input_and_forwards_options():
+    backend = RecordingBackend()
+    manager = LocalLLMManager({"fake": backend})
+
+    response = manager.embed(
+        backend="fake",
+        model="nomic-embed",
+        input="hello",
+        filename="model.gguf",
+        revision="v1",
+        n_gpu_layers=10,
+        n_ctx=2048,
+    )
+
+    assert response.embeddings == [[0.1, 0.2, 0.3]]
+    request = backend.embedding_requests[0]
+    assert request.model == "nomic-embed"
+    assert request.input == ("hello",)
+    assert request.model_source.filename == "model.gguf"
+    assert request.model_source.revision == "v1"
+    assert request.runtime.n_gpu_layers == 10
+    assert request.runtime.n_ctx == 2048
+
+
+@pytest.mark.asyncio
+async def test_manager_aembed_forwards_sequence():
+    backend = RecordingBackend()
+    manager = LocalLLMManager({"fake": backend})
+
+    response = await manager.aembed("fake", "nomic-embed", ["doc 1", "doc 2"])
+
+    assert response.embeddings == [[0.1, 0.2, 0.3]]
+    assert backend.embedding_requests[0].input == ("doc 1", "doc 2")
+
+
+def test_manager_embed_validates_inputs_and_capabilities():
+    backend = RecordingBackend()
+    manager = LocalLLMManager({"fake": backend})
+
+    with pytest.raises(ValueError, match="A model name is required"):
+        manager.embed("fake", "", "text")
+
+    with pytest.raises(ValueError, match="Embedding input must contain at least one string"):
+        manager.embed("fake", "model", [])
+
+    backend.capabilities = BackendCapabilities(embeddings=False)
+    with pytest.raises(UnsupportedFeatureError, match="does not support embeddings"):
+        manager.embed("fake", "model", "text")

@@ -1,10 +1,20 @@
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 from omnillm.core.base import LLMBackend
 from omnillm.core.errors import BackendUnavailableError
-from omnillm.core.types import ChatChunk, ChatRequest, ChatResponse, FinishReason, ModelSource, Usage
+from omnillm.core.types import (
+    ChatChunk,
+    ChatRequest,
+    ChatResponse,
+    EmbeddingData,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    FinishReason,
+    ModelSource,
+    Usage,
+)
 
 ollama: Any = None
 AsyncClient: Any = None
@@ -160,6 +170,38 @@ class OllamaAdapter(LLMBackend):
                 yield self._chunk(chunk)
 
         return stream()
+
+    @classmethod
+    def _embedding_response(cls, request: EmbeddingRequest, raw_response: Any) -> EmbeddingResponse:
+        embeddings = _value(raw_response, "embeddings", []) or []
+        data = [EmbeddingData(index=idx, embedding=tuple(emb)) for idx, emb in enumerate(embeddings)]
+        prompt_tokens = _value(raw_response, "prompt_eval_count")
+        usage = Usage(prompt_tokens=prompt_tokens) if prompt_tokens is not None else None
+        return EmbeddingResponse(data=data, model=request.model, usage=usage)
+
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        self.pull_model(request.model, request.model_source)
+        client = self._require_client()
+        if hasattr(client, "embed"):
+            response = client.embed(model=request.model, input=list(request.input))
+            return self._embedding_response(request, response)
+        embeddings: list[Sequence[float]] = []
+        for text in request.input:
+            res = client.embeddings(model=request.model, prompt=text)
+            embeddings.append(_value(res, "embedding", []))
+        return self._embedding_response(request, {"embeddings": embeddings})
+
+    async def aembed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        await asyncio.to_thread(self.pull_model, request.model, request.model_source)
+        client = self._make_async_client()
+        if hasattr(client, "embed"):
+            response = await client.embed(model=request.model, input=list(request.input))
+            return self._embedding_response(request, response)
+        embeddings: list[Sequence[float]] = []
+        for text in request.input:
+            res = await client.embeddings(model=request.model, prompt=text)
+            embeddings.append(_value(res, "embedding", []))
+        return self._embedding_response(request, {"embeddings": embeddings})
 
     def list_models(self) -> list[str]:
         response = self._require_client().list()

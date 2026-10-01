@@ -38,6 +38,7 @@
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling** | Native function/tool calling support across backends |
 | **JSON Mode** | Enforce structured JSON output from any supported model |
+| **Vector Embeddings** | Generate vector embeddings for RAG and semantic search via SDK or API |
 | **OpenAI-Compatible API** | Drop-in FastAPI server compatible with the OpenAI SDK |
 | **Async-First** | Full `async`/`await` support for high-concurrency workloads |
 | **Auto Model Pull** | Automatically downloads models from Ollama or Hugging Face Hub |
@@ -229,6 +230,36 @@ response = manager.chat(
 # response.content contains a JSON string
 ```
 
+#### Embeddings (RAG & Semantic Search)
+
+Generate dense vector embeddings for documents or search queries using either backend:
+
+```python
+# Synchronous embeddings with Ollama
+response = manager.embed(
+    backend="ollama",
+    model="nomic-embed-text",
+    input=["Retrieval-augmented generation with local LLMs", "Semantic similarity search"]
+)
+print(response.embeddings)  # [[0.021, -0.043, ...], [0.112, 0.009, ...]]
+print(response.usage.prompt_tokens)
+
+# Embeddings with llama.cpp (auto-downloads GGUF from Hugging Face Hub)
+response = manager.embed(
+    backend="llama.cpp",
+    model="nomic-ai/nomic-embed-text-v1.5-GGUF",
+    filename="nomic-embed-text-v1.5.Q4_K_M.gguf",
+    input="Single string input is also supported"
+)
+
+# Asynchronous embeddings
+response = await manager.aembed(
+    backend="ollama",
+    model="nomic-embed-text",
+    input=["Async batch embedding"]
+)
+```
+
 ---
 
 ### Interactive CLI
@@ -270,21 +301,38 @@ client = openai.OpenAI(
     api_key="not-needed"
 )
 
+# Chat completions
 response = client.chat.completions.create(
     model="ollama/llama3",          # prefix with backend name
     messages=[{"role": "user", "content": "Explain relativity in one sentence."}]
 )
 print(response.choices[0].message.content)
+
+# Embeddings
+embedding_res = client.embeddings.create(
+    model="ollama/nomic-embed-text",
+    input=["Embed this chunk for vector search", "Another document"]
+)
+print(embedding_res.data[0].embedding)
 ```
 
 #### Use with curl
 
 ```bash
+# Chat completions
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "ollama/llama3",
     "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Embeddings
+curl -X POST http://localhost:8000/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama/nomic-embed-text",
+    "input": ["Local vector embeddings with Omni-Local-LLM"]
   }'
 ```
 

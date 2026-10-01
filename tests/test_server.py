@@ -81,3 +81,51 @@ def test_request_errors_are_openai_shaped():
     assert unknown_backend.json()["error"]["type"] == "invalid_request_error"
     assert unsupported_n.status_code == 400
     assert unsupported_n.json()["error"]["message"] == "Only n=1 is supported."
+
+
+def test_embeddings_endpoint_returns_openai_format():
+    from omnillm.core.types import EmbeddingData, EmbeddingResponse
+
+    backend = RecordingBackend(
+        embedding_response=EmbeddingResponse(
+            data=(
+                EmbeddingData(index=0, embedding=(0.1, 0.2)),
+                EmbeddingData(index=1, embedding=(0.3, 0.4)),
+            ),
+            usage=Usage(prompt_tokens=6),
+        )
+    )
+    client = make_client(backend)
+
+    response = client.post(
+        "/v1/embeddings",
+        json={"model": "fake/nomic-embed", "input": ["first", "second"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["object"] == "list"
+    assert payload["model"] == "fake/nomic-embed"
+    assert len(payload["data"]) == 2
+    assert payload["data"][0] == {"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}
+    assert payload["data"][1] == {"object": "embedding", "index": 1, "embedding": [0.3, 0.4]}
+    assert payload["usage"] == {"prompt_tokens": 6, "total_tokens": 6}
+    assert backend.embedding_requests[0].input == ("first", "second")
+
+
+def test_embeddings_endpoint_validates_input_and_encoding():
+    client = make_client(RecordingBackend())
+
+    bad_encoding = client.post(
+        "/v1/embeddings",
+        json={"model": "fake/test", "input": "text", "encoding_format": "base64"},
+    )
+    empty_input = client.post(
+        "/v1/embeddings",
+        json={"model": "fake/test", "input": []},
+    )
+
+    assert bad_encoding.status_code == 400
+    assert "Only float encoding_format is supported" in bad_encoding.json()["error"]["message"]
+    assert empty_input.status_code == 400
+    assert "Embedding input must contain non-empty strings" in empty_input.json()["error"]["message"]

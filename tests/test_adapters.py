@@ -5,7 +5,7 @@ import pytest
 
 from omnillm.adapters.llamacpp_adapter import LlamaCPPAdapter
 from omnillm.adapters.ollama_adapter import OllamaAdapter
-from omnillm.core.types import ChatRequest, ModelSource
+from omnillm.core.types import ChatRequest, EmbeddingRequest, ModelSource
 
 
 class FakeOllamaClient:
@@ -28,6 +28,13 @@ class FakeOllamaClient:
             "eval_count": 2,
         }
 
+    def embed(self, model: str, input: list[str]) -> dict[str, Any]:
+        self.embed_kwargs = {"model": model, "input": input}
+        return {
+            "embeddings": [[0.1, 0.2] for _ in input],
+            "prompt_eval_count": 4,
+        }
+
     def list(self) -> dict[str, Any]:
         return {"models": [{"model": "llama3"}]}
 
@@ -35,6 +42,7 @@ class FakeOllamaClient:
 class FakeAsyncOllamaClient:
     def __init__(self):
         self.chat_kwargs: dict[str, Any] | None = None
+        self.embed_kwargs: dict[str, Any] | None = None
 
     async def chat(self, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
         self.chat_kwargs = kwargs
@@ -44,6 +52,13 @@ class FakeAsyncOllamaClient:
             yield {"message": {"content": "two"}, "done": True}
 
         return stream()
+
+    async def embed(self, model: str, input: list[str]) -> dict[str, Any]:
+        self.embed_kwargs = {"model": model, "input": input}
+        return {
+            "embeddings": [[0.1, 0.2] for _ in input],
+            "prompt_eval_count": 4,
+        }
 
 
 def test_ollama_maps_generation_options_and_normalizes_usage():
@@ -112,6 +127,36 @@ class FakeLlama:
             "usage": {"prompt_tokens": 4, "completion_tokens": 1},
         }
 
+    def create_embedding(self, input: list[str], model: str | None = None) -> dict[str, Any]:
+        self.embed_kwargs = {"input": input, "model": model}
+        return {
+            "data": [{"index": i, "embedding": [0.5, 0.6]} for i in range(len(input))],
+            "usage": {"prompt_tokens": 5, "total_tokens": 5},
+        }
+
+
+def test_ollama_embed():
+    client = FakeOllamaClient()
+    adapter = OllamaAdapter(client=client)
+
+    res = adapter.embed(EmbeddingRequest(model="test-embed", input=["hello", "world"]))
+
+    assert res.embeddings == [[0.1, 0.2], [0.1, 0.2]]
+    assert res.usage is not None and res.usage.prompt_tokens == 4
+    assert client.embed_kwargs == {"model": "test-embed", "input": ["hello", "world"]}
+
+
+@pytest.mark.asyncio
+async def test_ollama_aembed():
+    client = FakeOllamaClient()
+    async_client = FakeAsyncOllamaClient()
+    adapter = OllamaAdapter(client=client, async_client_factory=lambda: async_client)
+
+    res = await adapter.aembed(EmbeddingRequest(model="test-embed", input=["doc"]))
+
+    assert res.embeddings == [[0.1, 0.2]]
+    assert async_client.embed_kwargs == {"model": "test-embed", "input": ["doc"]}
+
 
 def test_llamacpp_caches_model_and_forwards_generation_options():
     downloads: list[dict[str, Any]] = []
@@ -154,3 +199,25 @@ async def test_llamacpp_async_stream_ends_cleanly():
     stream = await adapter.achat(request)
 
     assert [chunk.content async for chunk in stream] == ["hello", " world"]
+
+
+def test_llamacpp_embed_sets_embedding_mode_and_returns_embeddings():
+    downloads: list[dict[str, Any]] = []
+
+    def download(**kwargs: Any) -> str:
+        downloads.append(kwargs)
+        return "/models/test.gguf"
+
+    adapter = LlamaCPPAdapter(llama_factory=FakeLlama, hub_download=download)
+    request = EmbeddingRequest(
+        model="owner/embed-model",
+        input=["chunk 1", "chunk 2"],
+        model_source=ModelSource(filename="test.gguf"),
+    )
+
+    response = adapter.embed(request)
+
+    assert response.embeddings == [[0.5, 0.6], [0.5, 0.6]]
+    assert response.usage is not None and response.usage.prompt_tokens == 5
+    assert FakeLlama.instances[-1].init_kwargs.get("embedding") is True
+    assert FakeLlama.instances[-1].embed_kwargs == {"input": ["chunk 1", "chunk 2"], "model": "owner/embed-model"}

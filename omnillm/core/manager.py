@@ -8,6 +8,8 @@ from omnillm.core.types import (
     ChatMessage,
     ChatRequest,
     ChatResult,
+    EmbeddingRequest,
+    EmbeddingResponse,
     ModelSource,
     RuntimeOptions,
 )
@@ -179,6 +181,94 @@ class LocalLLMManager:
             n_ctx=n_ctx,
         )
         return await adapter.achat(request)
+
+    def _make_embedding_request(
+        self,
+        backend: str,
+        model: str,
+        input: str | Sequence[str],
+        *,
+        filename: str | None,
+        revision: str | None,
+        cache_dir: str | None,
+        local_files_only: bool,
+        n_gpu_layers: int | None,
+        n_ctx: int | None,
+    ) -> tuple[LLMBackend, EmbeddingRequest]:
+        if not model:
+            raise ValueError("A model name is required.")
+        if isinstance(input, str):
+            inputs: tuple[str, ...] = (input,)
+        elif isinstance(input, Sequence):
+            inputs = tuple(input)
+        else:
+            raise ValueError("Embedding input must be a string or a sequence of strings.")
+
+        if not inputs or any(not isinstance(item, str) for item in inputs):
+            raise ValueError("Embedding input must contain at least one string.")
+
+        adapter = self._get_backend(backend)
+        if not adapter.capabilities.embeddings:
+            raise UnsupportedFeatureError(f"Backend '{backend}' does not support embeddings.")
+
+        return adapter, EmbeddingRequest(
+            model=model,
+            input=inputs,
+            model_source=ModelSource(filename, revision, cache_dir, local_files_only),
+            runtime=RuntimeOptions(n_gpu_layers, n_ctx),
+        )
+
+    def embed(
+        self,
+        backend: str,
+        model: str,
+        input: str | Sequence[str],
+        *,
+        filename: str | None = None,
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        local_files_only: bool = False,
+        n_gpu_layers: int | None = None,
+        n_ctx: int | None = None,
+    ) -> EmbeddingResponse:
+        adapter, request = self._make_embedding_request(
+            backend,
+            model,
+            input,
+            filename=filename,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        )
+        return adapter.embed(request)
+
+    async def aembed(
+        self,
+        backend: str,
+        model: str,
+        input: str | Sequence[str],
+        *,
+        filename: str | None = None,
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        local_files_only: bool = False,
+        n_gpu_layers: int | None = None,
+        n_ctx: int | None = None,
+    ) -> EmbeddingResponse:
+        adapter, request = self._make_embedding_request(
+            backend,
+            model,
+            input,
+            filename=filename,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+        )
+        return await adapter.aembed(request)
 
     def create_session(self, backend: str, model: str, system_prompt: str | None = None):
         from omnillm.core.session import ChatSession

@@ -65,6 +65,14 @@ class Usage:
             "total_tokens": total_tokens,
         }
 
+    def as_openai_embedding(self) -> dict[str, int] | None:
+        if self.prompt_tokens is None:
+            return None
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "total_tokens": self.prompt_tokens,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class ChatResponse:
@@ -82,10 +90,38 @@ class ChatChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingRequest:
+    """One backend-neutral embedding request."""
+
+    model: str
+    input: Sequence[str]
+    model_source: ModelSource = field(default_factory=ModelSource)
+    runtime: RuntimeOptions = field(default_factory=RuntimeOptions)
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingData:
+    index: int
+    embedding: Sequence[float]
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingResponse:
+    data: Sequence[EmbeddingData]
+    model: str = ""
+    usage: Usage | None = None
+
+    @property
+    def embeddings(self) -> list[list[float]]:
+        return [list(item.embedding) for item in self.data]
+
+
+@dataclass(frozen=True, slots=True)
 class BackendCapabilities:
     streaming: bool = True
     json_mode: bool = True
     tools: bool = True
+    embeddings: bool = True
 
 
 type ChatResult = ChatResponse | Iterator[ChatChunk]

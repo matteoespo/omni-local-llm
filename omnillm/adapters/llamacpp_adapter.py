@@ -4,7 +4,17 @@ from typing import Any
 
 from omnillm.core.base import LLMBackend
 from omnillm.core.errors import BackendUnavailableError, InvalidRequestError
-from omnillm.core.types import ChatChunk, ChatRequest, ChatResponse, FinishReason, ModelSource, Usage
+from omnillm.core.types import (
+    ChatChunk,
+    ChatRequest,
+    ChatResponse,
+    EmbeddingData,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    FinishReason,
+    ModelSource,
+    Usage,
+)
 
 hf_hub_download: Any = None
 try:
@@ -55,7 +65,7 @@ class LlamaCPPAdapter(LLMBackend):
     ):
         self._llama_factory = llama_factory if llama_factory is not None else Llama
         self._hub_download = hub_download if hub_download is not None else hf_hub_download
-        self._active_key: tuple[str, ModelSource] | None = None
+        self._active_key: tuple[str, ModelSource, bool] | None = None
         self._llm: Any | None = None
 
     def _require_dependencies(self) -> tuple[Callable[..., Any], Callable[..., str]]:
@@ -77,8 +87,8 @@ class LlamaCPPAdapter(LLMBackend):
             local_files_only=source.local_files_only,
         )
 
-    def _load_model(self, request: ChatRequest) -> Any:
-        key = (request.model, request.model_source)
+    def _load_model(self, request: ChatRequest | EmbeddingRequest, embedding: bool = False) -> Any:
+        key = (request.model, request.model_source, embedding)
         if self._active_key == key and self._llm is not None:
             return self._llm
 
@@ -91,6 +101,8 @@ class LlamaCPPAdapter(LLMBackend):
         }
         if request.runtime.n_ctx is not None:
             runtime_kwargs["n_ctx"] = request.runtime.n_ctx
+        if embedding:
+            runtime_kwargs["embedding"] = True
         self._llm = llama_factory(**runtime_kwargs)
         self._active_key = key
         return self._llm
@@ -183,6 +195,25 @@ class LlamaCPPAdapter(LLMBackend):
                 yield chunk
 
         return stream()
+
+    def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        llm = self._load_model(request, embedding=True)
+        raw_response = llm.create_embedding(input=list(request.input), model=request.model)
+        raw_data = _value(raw_response, "data", []) or []
+        data = [
+            EmbeddingData(
+                index=_value(item, "index", idx),
+                embedding=tuple(_value(item, "embedding", [])),
+            )
+            for idx, item in enumerate(raw_data)
+        ]
+        raw_usage = _value(raw_response, "usage")
+        prompt_tokens = _value(raw_usage, "prompt_tokens") if raw_usage else None
+        usage = Usage(prompt_tokens=prompt_tokens) if prompt_tokens is not None else None
+        return EmbeddingResponse(data=data, model=request.model, usage=usage)
+
+    async def aembed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        return await asyncio.to_thread(self.embed, request)
 
     def list_models(self) -> list[str]:
         return [self._active_key[0]] if self._active_key else []

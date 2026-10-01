@@ -42,6 +42,14 @@ class ChatCompletionRequest(BaseModel):
     n: int = Field(default=1, ge=1)
 
 
+class EmbeddingInputRequest(BaseModel):
+    model: str = Field(min_length=1)
+    input: str | list[str]
+    encoding_format: Literal["float", "base64"] = "float"
+    dimensions: int | None = None
+    user: str | None = None
+
+
 def parse_model_string(model_string: str) -> tuple[str, str]:
     """Parses 'backend/model_name' into a registered backend and model name."""
     if "/" not in model_string:
@@ -190,6 +198,45 @@ def create_app(manager: LocalLLMManager | None = None) -> FastAPI:
         }
         if response.usage is not None and (usage := response.usage.as_openai()) is not None:
             payload["usage"] = usage
+        return payload
+
+    @app.post("/v1/embeddings", response_model=None)
+    async def embeddings(request: EmbeddingInputRequest) -> JSONResponse | dict[str, Any]:
+        if request.encoding_format != "float":
+            return _error_response(InvalidRequestError("Only float encoding_format is supported."))
+
+        inputs = [request.input] if isinstance(request.input, str) else request.input
+        if not inputs or any(not isinstance(text, str) or not text for text in inputs):
+            return _error_response(InvalidRequestError("Embedding input must contain non-empty strings."))
+
+        try:
+            backend, model_name = parse_model_string(request.model)
+            response = await llm_manager.aembed(
+                backend=backend,
+                model=model_name,
+                input=inputs,
+            )
+        except Exception as error:
+            return _error_response(error)
+
+        data = [
+            {
+                "object": "embedding",
+                "index": item.index,
+                "embedding": list(item.embedding),
+            }
+            for item in response.data
+        ]
+        payload: dict[str, Any] = {
+            "object": "list",
+            "data": data,
+            "model": request.model,
+        }
+        if response.usage is not None and response.usage.prompt_tokens is not None:
+            payload["usage"] = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "total_tokens": response.usage.prompt_tokens,
+            }
         return payload
 
     return app
