@@ -23,6 +23,8 @@
   <a href="#-architecture">Architecture</a> •
   <a href="#-installation">Installation</a> •
   <a href="#-usage">Usage</a> •
+  <a href="#-interactive-cli">CLI</a> •
+  <a href="#-evaluation--benchmarking-harness">Harness</a> •
   <a href="#-api-server">API Server</a> •
   <a href="#-contributing">Contributing</a>
 </p>
@@ -35,6 +37,8 @@
 |---|---|
 | **Multi-Backend** | Swap between [Ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggerganov/llama.cpp) with a single parameter change |
 | **Vision & Multimodal** | Native image understanding across Ollama and llama.cpp (file paths, bytes, data URIs, and OpenAI format) |
+| **Evaluation & Benchmarking** | Measure TTFT, tokens/sec, schema compliance, tool-calling precision, and needle-in-haystack context retrieval |
+| **Unified CLI** | Dedicated binary `omnillm` with `chat`, `run`, `models`, `bench`, `eval`, and `serve` commands |
 | **Chat Sessions & Pruning** | Resilient turn commits, sliding-window turn pruning, token budget enforcement, and thread-safe resets |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling** | Native function/tool calling support across backends |
@@ -372,20 +376,111 @@ response = manager.chat(
 
 ### Interactive CLI
 
-Start an interactive chat session directly in your terminal:
+Omni-Local-LLM provides a first-class command-line binary `omnillm` for interactive chat, one-shot prompt execution, model inspection, benchmarking, and serving:
 
 ```bash
-# Using Ollama
-python -m omnillm --backend ollama --model llama3
+# 1. Interactive multi-turn chat (with /clear, /reset, /tokens, /system, /exit)
+omnillm chat --backend ollama --model llama3
 
-# Using llama.cpp (auto-downloads from Hugging Face)
-python -m omnillm --backend llama.cpp \
-    --model unsloth/llama-3-8b-Instruct-GGUF \
-    --filename llama-3-8b-Instruct-Q4_K_M.gguf
+# Chat with context window pruning constraints
+omnillm chat --model llama3 --max-turns 10 --max-tokens 2048
 
-# With a system prompt
-python -m omnillm --backend ollama --model llama3 \
-    --system "You are a pirate. Respond only in pirate speak."
+# 2. One-shot prompt execution (ideal for bash scripts and UNIX pipes)
+omnillm run --model llama3 "Explain quantum computing in one sentence."
+cat document.txt | omnillm run --model llama3 "Summarize the key points:"
+
+# 3. List installed / detected local models
+omnillm models
+
+# 4. Run performance benchmark (TTFT and throughput)
+omnillm bench --backend ollama --model llama3 --runs 3
+
+# 5. Run model evaluations or Needle-In-A-Haystack retrieval test
+omnillm eval --backend ollama --model llama3
+omnillm eval --backend ollama --model llama3 --needle
+
+# 6. Start the OpenAI-compatible FastAPI server
+omnillm serve --host 127.0.0.1 --port 8000
+```
+
+---
+
+### Evaluation & Benchmarking Harness
+
+Omni-Local-LLM includes an evaluation and benchmarking harness to measure local model performance, schema reliability, and context retrieval:
+
+#### 1. Performance Benchmarking (`BenchmarkHarness`)
+
+Benchmark Time to First Token (TTFT), generation throughput (Tokens/sec), and latency across multiple models and backends:
+
+```python
+from omnillm.harness import BenchmarkHarness
+
+harness = BenchmarkHarness()
+suite = harness.run(
+    targets=[
+        ("ollama", "llama3"),
+        ("llama.cpp", "unsloth/llama-3-8b-Instruct-GGUF", {"filename": "llama-3-8b-Instruct-Q4_K_M.gguf"}),
+    ],
+    prompt="Explain quantum physics in three sentences.",
+    max_tokens=128,
+    runs=3,
+)
+
+# Print markdown comparison table directly to terminal
+suite.print_table()
+```
+
+Output:
+```
+| Backend   | Model                                | TTFT (ms) | Tokens/sec | Total (s) | Runs |
+|-----------|--------------------------------------|-----------|------------|-----------|------|
+| ollama    | llama3                               | 312.4     | 45.2       | 2.85      | 3    |
+| llama.cpp | unsloth/llama-3-8b-Instruct-GGUF     | 240.1     | 48.6       | 2.63      | 3    |
+```
+
+#### 2. Capability & Schema Compliance (`EvalHarness`)
+
+Systematically evaluate reasoning, JSON Schema adherence, and tool-calling precision:
+
+```python
+from pydantic import BaseModel
+from omnillm.harness import EvalHarness, EvalTestCase
+
+class Person(BaseModel):
+    name: str
+    age: int
+
+harness = EvalHarness()
+results = harness.run_suite(
+    backend="ollama",
+    model="llama3",
+    test_cases=[
+        EvalTestCase(name="Regex Check", prompt="Capital of France?", expected_pattern=r"Paris"),
+        EvalTestCase(name="Schema Test", prompt="Extract: Bob, 34", expected_schema=Person),
+    ],
+)
+results.print_table()
+# Outputs pass rate %, individual test latency, and errors
+```
+
+#### 3. Context Retrieval ("Needle In A Haystack")
+
+Stress-test context length retrieval by hiding a secret code at 0%, 25%, 50%, 75%, and 100% depths:
+
+```python
+from omnillm.harness import NeedleHarness
+
+needle_harness = NeedleHarness()
+result = needle_harness.run(
+    backend="ollama",
+    model="llama3",
+    secret_code="ALPHA-777",
+    depths=[0, 25, 50, 75, 100],
+    target_word_count=1500,
+)
+result.print_table()
+# Displays retrieval success and extraction latency per depth
 ```
 
 ---
@@ -395,7 +490,8 @@ python -m omnillm --backend ollama --model llama3 \
 Launch an OpenAI-compatible local API server:
 
 ```bash
-python -m omnillm.server
+omnillm serve
+# Or: python -m omnillm.server
 # Server runs on http://localhost:8000
 ```
 

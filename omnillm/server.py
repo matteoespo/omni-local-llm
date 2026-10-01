@@ -83,7 +83,7 @@ def _sse(data: dict[str, Any]) -> str:
 
 
 def create_app(manager: LocalLLMManager | None = None) -> FastAPI:
-    app = FastAPI(title="Omni-Local-LLM OpenAI API", version="0.2.0")
+    app = FastAPI(title="Omni-Local-LLM OpenAI API", version="0.3.0")
     llm_manager = manager or LocalLLMManager()
 
     @app.get("/v1/models", response_model=None)

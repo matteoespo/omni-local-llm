@@ -1,6 +1,6 @@
 [project]
 name = "omni-local-llm"
-version = "0.2.0"
+version = "0.3.0"
 description = "A unified Python interface and API server for running local Large Language Models."
 readme = "README.md"
 license = { text = "MIT" }
@@ -52,6 +52,9 @@ all = [
     "fastapi>=0.111.0",
     "uvicorn>=0.30.1",
 ]
+
+[project.scripts]
+omnillm = "omnillm.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/matteoespo/omni-local-llm"

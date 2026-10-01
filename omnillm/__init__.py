@@ -9,9 +9,11 @@ from .core.types import (
     EmbeddingResponse,
     Usage,
 )
+from .harness import BenchmarkHarness, EvalHarness, NeedleHarness
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
+    "BenchmarkHarness",
     "ChatChunk",
     "ChatRequest",
     "ChatResponse",
@@ -19,6 +21,8 @@ __all__ = [
     "EmbeddingData",
     "EmbeddingRequest",
     "EmbeddingResponse",
+    "EvalHarness",
     "LocalLLMManager",
+    "NeedleHarness",
     "Usage",
 ]
