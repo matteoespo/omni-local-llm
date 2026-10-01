@@ -41,7 +41,7 @@
 | **Unified CLI** | Dedicated binary `omnillm` with `chat`, `run`, `models`, `bench`, `eval`, and `serve` commands |
 | **Chat Sessions & Pruning** | Resilient turn commits, sliding-window turn pruning, token budget enforcement, and thread-safe resets |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
-| **Tool Calling** | Native function/tool calling support across backends |
+| **Tool Calling & Agents** | Autonomous function execution loop (`@tool` decorator & `session.act`) |
 | **Structured Outputs** | Guaranteed JSON schema adherence and Pydantic validation via GBNF or Ollama schemas |
 | **Vector Embeddings** | Generate vector embeddings for RAG and semantic search via SDK or API |
 | **OpenAI-Compatible API** | Drop-in FastAPI server compatible with the OpenAI SDK |
@@ -211,32 +211,43 @@ async def main():
 asyncio.run(main())
 ```
 
-#### Tool Calling
+#### Tool Calling & Autonomous Agent Loop (`@tool` & `session.act`)
+
+Omni-Local-LLM provides an **autonomous tool-calling loop**. Decorate any Python function with `@tool` (or pass plain functions), and `session.act()` will automatically inspect type hints, invoke the function, feed results back to the model, and return the final answer:
 
 ```python
-tools = [{
-    "type": "function",
-    "function": {
-        "name": "get_weather",
-        "description": "Get current weather for a city",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "city": {"type": "string", "description": "City name"}
-            },
-            "required": ["city"]
-        }
-    }
-}]
+from omnillm import tool
 
-response = manager.chat(
-    backend="ollama",
-    model="llama3",
-    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
-    tools=tools
+# 1. Define tools with standard Python type hints and docstrings
+@tool
+def get_weather(city: str, unit: str = "celsius") -> str:
+    """Get the current weather conditions for a city."""
+    return f"24 degrees {unit}, sunny"
+
+@tool
+def calculate_travel_time(distance_km: float, speed_kmh: float = 80.0) -> float:
+    """Calculate the estimated travel time in hours."""
+    return round(distance_km / speed_kmh, 2)
+
+# 2. Run the autonomous agent loop
+session = manager.create_session(backend="ollama", model="llama3")
+response = session.act(
+    "What's the weather in Rome, and how long does it take to drive 320 km?",
+    tools=[get_weather, calculate_travel_time]
 )
-# response.tool_calls contains the function call
+
+print(response.content)
+# The model invokes get_weather("Rome"), then calculate_travel_time(320.0),
+# and automatically returns the final answer with observations included!
+
+# Asynchronous agent loop
+response = await session.aact(
+    "Check weather in Tokyo",
+    tools=[get_weather]
+)
 ```
+
+Manual low-level OpenAI-format tool calling is also supported via `manager.chat(..., tools=tools)`.
 
 #### Structured Outputs & Pydantic Validation
 

@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -384,3 +384,128 @@ class ChatSession:
             self.messages = []
             if system_prompt:
                 self.messages.append({"role": "system", "content": system_prompt})
+
+    def act(
+        self,
+        user_input: str,
+        *,
+        tools: Sequence[Callable[..., Any] | dict[str, Any]],
+        max_steps: int = 5,
+        images: Sequence[str | bytes | Any] | None = None,
+        **options: Any,
+    ) -> ChatResponse:
+        """Executes an autonomous tool-calling loop: sends prompt, executes tool calls,
+
+        feeds observations back to the model, and returns the final answer.
+        """
+        from omnillm.core.tools import ToolRegistry
+
+        registry = ToolRegistry(tools)
+        response = self.send(
+            user_input,
+            images=images,
+            tools=registry.schemas,
+            stream=False,
+            **options,
+        )
+
+        step = 1
+        while response.tool_calls and step < max_steps:
+            step += 1
+            for call in response.tool_calls:
+                func_info = call.get("function", {})
+                name = func_info.get("name", "") if isinstance(func_info, dict) else ""
+                args = func_info.get("arguments", "{}") if isinstance(func_info, dict) else "{}"
+                call_id = call.get("id") or f"call_{step}"
+                result_str = registry.execute(name, args)
+                tool_msg: ChatMessage = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": result_str,
+                }
+                self.messages.append(tool_msg)
+
+            self._claim_turn()
+            try:
+                next_result = self.manager.chat(
+                    self.backend,
+                    self.model,
+                    self.messages,
+                    tools=registry.schemas,
+                    stream=False,
+                    **options,
+                )
+                if not isinstance(next_result, ChatResponse):
+                    raise RuntimeError("Backend returned a stream during autonomous tool execution.")
+                assistant_msg: ChatMessage = {"role": "assistant", "content": next_result.content}
+                if next_result.tool_calls:
+                    assistant_msg["tool_calls"] = list(next_result.tool_calls)
+                self.messages.append(assistant_msg)
+                self._prune_history()
+                response = next_result
+            finally:
+                self._release_turn()
+
+        return response
+
+    async def aact(
+        self,
+        user_input: str,
+        *,
+        tools: Sequence[Callable[..., Any] | dict[str, Any]],
+        max_steps: int = 5,
+        images: Sequence[str | bytes | Any] | None = None,
+        **options: Any,
+    ) -> ChatResponse:
+        """Executes an asynchronous autonomous tool-calling loop."""
+        from omnillm.core.tools import ToolRegistry
+
+        registry = ToolRegistry(tools)
+        response = await self.asend(
+            user_input,
+            images=images,
+            tools=registry.schemas,
+            stream=False,
+            **options,
+        )
+
+        step = 1
+        while response.tool_calls and step < max_steps:
+            step += 1
+            for call in response.tool_calls:
+                func_info = call.get("function", {})
+                name = func_info.get("name", "") if isinstance(func_info, dict) else ""
+                args = func_info.get("arguments", "{}") if isinstance(func_info, dict) else "{}"
+                call_id = call.get("id") or f"call_{step}"
+                result_str = await registry.aexecute(name, args)
+                tool_msg: ChatMessage = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "name": name,
+                    "content": result_str,
+                }
+                self.messages.append(tool_msg)
+
+            self._claim_turn()
+            try:
+                next_result = await self.manager.achat(
+                    self.backend,
+                    self.model,
+                    self.messages,
+                    tools=registry.schemas,
+                    stream=False,
+                    **options,
+                )
+                if not isinstance(next_result, ChatResponse):
+                    raise RuntimeError("Backend returned a stream during autonomous tool execution.")
+                assistant_msg: ChatMessage = {"role": "assistant", "content": next_result.content}
+                if next_result.tool_calls:
+                    assistant_msg["tool_calls"] = list(next_result.tool_calls)
+                self.messages.append(assistant_msg)
+                self._prune_history()
+                response = next_result
+            finally:
+                self._release_turn()
+
+        return response

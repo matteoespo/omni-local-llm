@@ -1,5 +1,6 @@
 from .core.manager import LocalLLMManager
 from .core.session import ChatSession
+from .core.tools import ToolRegistry, function_to_tool_schema, tool
 from .core.types import (
     ChatChunk,
     ChatRequest,
@@ -24,5 +25,8 @@ __all__ = [
     "EvalHarness",
     "LocalLLMManager",
     "NeedleHarness",
+    "ToolRegistry",
     "Usage",
+    "function_to_tool_schema",
+    "tool",
 ]
