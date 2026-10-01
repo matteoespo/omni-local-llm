@@ -1,12 +1,18 @@
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from omnillm.core.base import LLMBackend
-from omnillm.core.errors import BackendNotFoundError, BackendUnavailableError, UnsupportedFeatureError
+from omnillm.core.errors import (
+    BackendNotFoundError,
+    BackendUnavailableError,
+    InvalidRequestError,
+    UnsupportedFeatureError,
+)
 from omnillm.core.types import (
     AsyncChatResult,
     ChatMessage,
     ChatRequest,
+    ChatResponse,
     ChatResult,
     EmbeddingRequest,
     EmbeddingResponse,
@@ -27,6 +33,58 @@ def _create_llamacpp() -> LLMBackend:
     from omnillm.adapters.llamacpp_adapter import LlamaCPPAdapter
 
     return LlamaCPPAdapter()
+
+
+def _resolve_response_format(
+    response_model: type[Any] | None,
+    response_format: dict[str, Any] | None,
+    json_mode: bool,
+) -> tuple[bool, dict[str, Any] | None]:
+    if response_model is not None:
+        if hasattr(response_model, "model_json_schema"):
+            schema = response_model.model_json_schema()
+        elif hasattr(response_model, "schema"):
+            schema = response_model.schema()
+        else:
+            raise ValueError(f"response_model '{response_model}' must be a Pydantic model with model_json_schema().")
+        return True, {
+            "type": "json_schema",
+            "json_schema": {
+                "name": getattr(response_model, "__name__", "ResponseModel"),
+                "schema": schema,
+                "strict": True,
+            },
+        }
+    if response_format is not None:
+        fmt_type = response_format.get("type", "")
+        is_json = (
+            json_mode
+            or fmt_type in {"json_object", "json_schema"}
+            or "schema" in response_format
+            or "properties" in response_format
+        )
+        return is_json, response_format
+    return json_mode, None
+
+
+def _attach_parsed_model[R: (ChatResult, AsyncChatResult)](result: R, response_model: type[Any] | None) -> R:
+    if response_model is None or not isinstance(result, ChatResponse):
+        return result
+    try:
+        parsed = result.parse_as(response_model)
+        return cast(
+            R,
+            ChatResponse(
+                content=result.content,
+                tool_calls=result.tool_calls,
+                finish_reason=result.finish_reason,
+                usage=result.usage,
+                parsed=parsed,
+            ),
+        )
+    except Exception as error:
+        name = getattr(response_model, "__name__", str(response_model))
+        raise InvalidRequestError(f"Failed to parse response into {name}: {error}") from error
 
 
 class LocalLLMManager:
@@ -67,6 +125,8 @@ class LocalLLMManager:
         *,
         stream: bool,
         json_mode: bool,
+        response_model: type[Any] | None,
+        response_format: dict[str, Any] | None,
         tools: Sequence[dict[str, Any]] | None,
         temperature: float | None,
         max_tokens: int | None,
@@ -84,15 +144,21 @@ class LocalLLMManager:
         adapter = self._get_backend(backend)
         if stream and not adapter.capabilities.streaming:
             raise UnsupportedFeatureError(f"Backend '{backend}' does not support streaming.")
-        if json_mode and not adapter.capabilities.json_mode:
+        is_json, resolved_format = _resolve_response_format(response_model, response_format, json_mode)
+        if is_json and not adapter.capabilities.json_mode:
             raise UnsupportedFeatureError(f"Backend '{backend}' does not support JSON mode.")
+        if (
+            response_model is not None or (resolved_format and resolved_format.get("type") == "json_schema")
+        ) and not getattr(adapter.capabilities, "structured_outputs", True):
+            raise UnsupportedFeatureError(f"Backend '{backend}' does not support structured outputs.")
         if tools and not adapter.capabilities.tools:
             raise UnsupportedFeatureError(f"Backend '{backend}' does not support tool calling.")
         return adapter, ChatRequest(
             model=model,
             messages=messages,
             stream=stream,
-            json_mode=json_mode,
+            json_mode=is_json,
+            response_format=resolved_format,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -110,6 +176,8 @@ class LocalLLMManager:
         *,
         stream: bool = False,
         json_mode: bool = False,
+        response_model: type[Any] | None = None,
+        response_format: dict[str, Any] | None = None,
         tools: Sequence[dict[str, Any]] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
@@ -128,6 +196,8 @@ class LocalLLMManager:
             messages,
             stream=stream,
             json_mode=json_mode,
+            response_model=response_model,
+            response_format=response_format,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -140,7 +210,8 @@ class LocalLLMManager:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
-        return adapter.chat(request)
+        result = adapter.chat(request)
+        return _attach_parsed_model(result, response_model)
 
     async def achat(
         self,
@@ -150,6 +221,8 @@ class LocalLLMManager:
         *,
         stream: bool = False,
         json_mode: bool = False,
+        response_model: type[Any] | None = None,
+        response_format: dict[str, Any] | None = None,
         tools: Sequence[dict[str, Any]] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
@@ -168,6 +241,8 @@ class LocalLLMManager:
             messages,
             stream=stream,
             json_mode=json_mode,
+            response_model=response_model,
+            response_format=response_format,
             tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -180,7 +255,8 @@ class LocalLLMManager:
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
         )
-        return await adapter.achat(request)
+        result = await adapter.achat(request)
+        return _attach_parsed_model(result, response_model)
 
     def _make_embedding_request(
         self,

@@ -37,7 +37,7 @@
 | **Chat Sessions** | Built-in conversation memory and history management |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling** | Native function/tool calling support across backends |
-| **JSON Mode** | Enforce structured JSON output from any supported model |
+| **Structured Outputs** | Guaranteed JSON schema adherence and Pydantic validation via GBNF or Ollama schemas |
 | **Vector Embeddings** | Generate vector embeddings for RAG and semantic search via SDK or API |
 | **OpenAI-Compatible API** | Drop-in FastAPI server compatible with the OpenAI SDK |
 | **Async-First** | Full `async`/`await` support for high-concurrency workloads |
@@ -218,16 +218,59 @@ response = manager.chat(
 # response.tool_calls contains the function call
 ```
 
-#### JSON Mode
+#### Structured Outputs & Pydantic Validation
+
+Guarantee JSON schema adherence at the sampler level (using Ollama schemas or llama.cpp GBNF grammars) and receive typed Pydantic models automatically:
 
 ```python
+from pydantic import BaseModel
+
+class UserProfile(BaseModel):
+    name: str
+    age: int
+    skills: list[str]
+
+response = manager.chat(
+    backend="ollama",
+    model="llama3",
+    messages=[{"role": "user", "content": "Extract: Alice is a 28-year-old engineer skilled in Python and Rust."}],
+    response_model=UserProfile,
+)
+
+# Access validated Pydantic object directly
+user: UserProfile = response.parsed
+print(user.name)    # Alice
+print(user.skills)  # ['Python', 'Rust']
+```
+
+You can also pass raw JSON schemas or request basic JSON mode:
+
+```python
+# Raw JSON Schema
+response = manager.chat(
+    backend="ollama",
+    model="llama3",
+    messages=[{"role": "user", "content": "Generate a city record"}],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "City",
+            "schema": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}, "population": {"type": "integer"}},
+                "required": ["city", "population"],
+            },
+        },
+    },
+)
+
+# Basic JSON Mode
 response = manager.chat(
     backend="ollama",
     model="llama3",
     messages=[{"role": "user", "content": "List 3 colors as JSON"}],
-    json_mode=True
+    json_mode=True,
 )
-# response.content contains a JSON string
 ```
 
 #### Embeddings (RAG & Semantic Search)
@@ -308,6 +351,24 @@ response = client.chat.completions.create(
 )
 print(response.choices[0].message.content)
 
+# Structured Outputs (JSON Schema)
+structured_res = client.chat.completions.create(
+    model="ollama/llama3",
+    messages=[{"role": "user", "content": "Extract: Alice, age 29"}],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "User",
+            "schema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+                "required": ["name", "age"],
+            },
+        },
+    },
+)
+print(structured_res.choices[0].message.content)
+
 # Embeddings
 embedding_res = client.embeddings.create(
     model="ollama/nomic-embed-text",
@@ -325,6 +386,25 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{
     "model": "ollama/llama3",
     "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Structured Outputs with JSON Schema
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama/llama3",
+    "messages": [{"role": "user", "content": "Alice is 29 years old."}],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "User",
+        "schema": {
+          "type": "object",
+          "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
+          "required": ["name", "age"]
+        }
+      }
+    }
   }'
 
 # Embeddings

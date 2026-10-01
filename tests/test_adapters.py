@@ -221,3 +221,40 @@ def test_llamacpp_embed_sets_embedding_mode_and_returns_embeddings():
     assert response.usage is not None and response.usage.prompt_tokens == 5
     assert FakeLlama.instances[-1].init_kwargs.get("embedding") is True
     assert FakeLlama.instances[-1].embed_kwargs == {"input": ["chunk 1", "chunk 2"], "model": "owner/embed-model"}
+
+
+def test_ollama_passes_schema_dict_when_json_schema_present():
+    client = FakeOllamaClient()
+    adapter = OllamaAdapter(client=client)
+    schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+
+    adapter.chat(
+        ChatRequest(
+            model="test-model",
+            messages=[],
+            response_format={"type": "json_schema", "json_schema": {"schema": schema}},
+        )
+    )
+
+    assert client.chat_kwargs is not None
+    assert client.chat_kwargs["format"] == schema
+
+
+def test_llamacpp_passes_json_object_with_schema_when_json_schema_present():
+    adapter = LlamaCPPAdapter(llama_factory=FakeLlama, hub_download=lambda **_: "/models/test.gguf")
+    schema = {"type": "object", "properties": {"age": {"type": "integer"}}}
+
+    adapter.chat(
+        ChatRequest(
+            model="owner/model",
+            messages=[],
+            model_source=ModelSource(filename="test.gguf"),
+            response_format={"type": "json_schema", "json_schema": {"schema": schema}},
+        )
+    )
+
+    assert FakeLlama.instances[-1].chat_kwargs is not None
+    assert FakeLlama.instances[-1].chat_kwargs["response_format"] == {
+        "type": "json_object",
+        "schema": schema,
+    }

@@ -61,3 +61,19 @@ async def test_async_session_commits_streamed_content():
 
     assert [chunk async for chunk in stream] == ["Async ", "stream"]
     assert session.messages[-1] == {"role": "assistant", "content": "Async stream"}
+
+
+def test_session_with_response_model():
+    from pydantic import BaseModel
+
+    class Item(BaseModel):
+        count: int
+
+    backend = RecordingBackend(response=ChatResponse(content='{"count": 42}'))
+    session = LocalLLMManager({"fake": backend}).create_session("fake", "test-model")
+
+    response = session.send("How many?", response_model=Item)
+
+    assert isinstance(response, ChatResponse)
+    assert response.parsed == Item(count=42)
+    assert session.messages[-1] == {"role": "assistant", "content": '{"count": 42}'}

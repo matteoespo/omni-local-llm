@@ -39,6 +39,32 @@ def test_chat_completions_forwards_parameters_and_returns_usage():
     assert request.stop == ["END"]
 
 
+def test_chat_completions_json_schema_response_format():
+    backend = RecordingBackend(response=ChatResponse(content='{"result": 123}'))
+    client = make_client(backend)
+
+    schema = {"type": "object", "properties": {"result": {"type": "integer"}}}
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "fake/test",
+            "messages": [{"role": "user", "content": "compute"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "Result", "schema": schema},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == '{"result": 123}'
+    request = backend.requests[0]
+    assert request.json_mode is True
+    assert request.response_format is not None
+    assert request.response_format["type"] == "json_schema"
+    assert request.json_schema == schema
+
+
 def test_models_endpoint_lists_models_from_available_backends():
     client = make_client(RecordingBackend(models=["one", "two"]))
 

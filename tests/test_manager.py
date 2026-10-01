@@ -109,3 +109,52 @@ def test_manager_embed_validates_inputs_and_capabilities():
     backend.capabilities = BackendCapabilities(embeddings=False)
     with pytest.raises(UnsupportedFeatureError, match="does not support embeddings"):
         manager.embed("fake", "model", "text")
+
+
+def test_manager_structured_output_with_response_model():
+    from pydantic import BaseModel
+
+    class Character(BaseModel):
+        name: str
+        level: int
+
+    backend = RecordingBackend(response=ChatResponse(content='{"name": "Arthur", "level": 10}'))
+    manager = LocalLLMManager({"fake": backend})
+
+    response = manager.chat(
+        backend="fake",
+        model="test-model",
+        messages=[{"role": "user", "content": "Create character"}],
+        response_model=Character,
+    )
+
+    assert isinstance(response, ChatResponse)
+    assert response.parsed == Character(name="Arthur", level=10)
+    assert response.parse_as(Character) == Character(name="Arthur", level=10)
+    request = backend.requests[0]
+    assert request.json_mode is True
+    assert request.response_format is not None
+    assert request.response_format["type"] == "json_schema"
+    assert request.json_schema is not None
+    assert "properties" in request.json_schema
+
+
+def test_manager_structured_output_parse_error():
+    from pydantic import BaseModel
+
+    from omnillm.core.errors import InvalidRequestError
+
+    class Character(BaseModel):
+        name: str
+        level: int
+
+    backend = RecordingBackend(response=ChatResponse(content="not json"))
+    manager = LocalLLMManager({"fake": backend})
+
+    with pytest.raises(InvalidRequestError, match="Failed to parse response into Character"):
+        manager.chat(
+            backend="fake",
+            model="test-model",
+            messages=[],
+            response_model=Character,
+        )

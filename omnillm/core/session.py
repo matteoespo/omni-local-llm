@@ -50,6 +50,8 @@ class ChatSession:
         *,
         stream: bool = False,
         json_mode: bool = False,
+        response_model: type[Any] | None = None,
+        response_format: dict[str, Any] | None = None,
         tools: Sequence[dict[str, Any]] | None = None,
         **options: Any,
     ) -> ChatResponse | Iterator[str]:
@@ -63,6 +65,8 @@ class ChatSession:
                 messages,
                 stream=stream,
                 json_mode=json_mode,
+                response_model=response_model,
+                response_format=response_format,
                 tools=tools,
                 **options,
             )
@@ -104,6 +108,8 @@ class ChatSession:
         *,
         stream: bool = False,
         json_mode: bool = False,
+        response_model: type[Any] | None = None,
+        response_format: dict[str, Any] | None = None,
         tools: Sequence[dict[str, Any]] | None = None,
         **options: Any,
     ) -> ChatResponse | AsyncIterator[str]:
@@ -117,6 +123,8 @@ class ChatSession:
                 messages,
                 stream=stream,
                 json_mode=json_mode,
+                response_model=response_model,
+                response_format=response_format,
                 tools=tools,
                 **options,
             )

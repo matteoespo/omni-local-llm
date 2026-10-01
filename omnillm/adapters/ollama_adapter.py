@@ -108,7 +108,9 @@ class OllamaAdapter(LLMBackend):
         }
         if options:
             kwargs["options"] = options
-        if request.json_mode:
+        if request.json_schema is not None:
+            kwargs["format"] = request.json_schema
+        elif request.is_json:
             kwargs["format"] = "json"
         if request.tools:
             kwargs["tools"] = list(request.tools)

@@ -118,7 +118,9 @@ class LlamaCPPAdapter(LLMBackend):
         }.items():
             if value is not None:
                 kwargs[key] = value
-        if request.json_mode:
+        if request.json_schema is not None:
+            kwargs["response_format"] = {"type": "json_object", "schema": request.json_schema}
+        elif request.is_json:
             kwargs["response_format"] = {"type": "json_object"}
         if request.tools:
             kwargs["tools"] = list(request.tools)

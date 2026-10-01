@@ -26,7 +26,9 @@ class ChatMessage(BaseModel):
 
 
 class ResponseFormat(BaseModel):
-    type: Literal["text", "json_object"] = "text"
+    type: Literal["text", "json_object", "json_schema"] = "text"
+    json_schema: dict[str, Any] | None = None
+    schema_: dict[str, Any] | None = Field(default=None, alias="schema")
 
 
 class ChatCompletionRequest(BaseModel):
@@ -106,12 +108,19 @@ def create_app(manager: LocalLLMManager | None = None) -> FastAPI:
 
         try:
             backend, model_name = parse_model_string(request.model)
+            response_format_dict: dict[str, Any] | None = None
+            json_mode = False
+            if request.response_format is not None and request.response_format.type != "text":
+                json_mode = True
+                response_format_dict = request.response_format.model_dump(by_alias=True, exclude_none=True)
+
             response = await llm_manager.achat(
                 backend=backend,
                 model=model_name,
                 messages=[message.model_dump(exclude_none=True) for message in request.messages],
                 stream=request.stream,
-                json_mode=request.response_format is not None and request.response_format.type == "json_object",
+                json_mode=json_mode,
+                response_format=response_format_dict,
                 tools=request.tools,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
