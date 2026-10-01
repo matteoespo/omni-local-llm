@@ -62,7 +62,18 @@ class ChatSession:
         total = 0
         for msg in messages:
             content = msg.get("content") or ""
-            total += len(content) // 4 + 4
+            if isinstance(content, str):
+                total += len(content) // 4 + 4
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            total += len(part.get("text") or "") // 4 + 4
+                        elif part.get("type") == "image_url":
+                            total += 256
+            images = msg.get("images")
+            if images and isinstance(images, (list, tuple)):
+                total += len(images) * 256
             tool_calls = msg.get("tool_calls")
             if tool_calls:
                 import json
@@ -144,6 +155,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: Literal[True],
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -157,6 +169,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: Literal[False] = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -170,6 +183,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: bool = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -182,6 +196,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: bool = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -191,6 +206,8 @@ class ChatSession:
     ) -> ChatResponse | Iterator[str]:
         self._claim_turn()
         user_message: ChatMessage = {"role": "user", "content": user_input}
+        if images:
+            user_message["images"] = list(images)
         messages = self._prepare_messages(user_message)
         try:
             result = self.manager.chat(
@@ -241,6 +258,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: Literal[True],
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -254,6 +272,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: Literal[False] = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -267,6 +286,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: bool = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -279,6 +299,7 @@ class ChatSession:
         self,
         user_input: str,
         *,
+        images: Sequence[str | bytes | Any] | None = None,
         stream: bool = False,
         json_mode: bool = False,
         response_model: type[Any] | None = None,
@@ -288,6 +309,8 @@ class ChatSession:
     ) -> ChatResponse | AsyncIterator[str]:
         self._claim_turn()
         user_message: ChatMessage = {"role": "user", "content": user_input}
+        if images:
+            user_message["images"] = list(images)
         messages = self._prepare_messages(user_message)
         try:
             result = await self.manager.achat(

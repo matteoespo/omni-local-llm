@@ -258,3 +258,60 @@ def test_llamacpp_passes_json_object_with_schema_when_json_schema_present():
         "type": "json_object",
         "schema": schema,
     }
+
+
+def test_ollama_multimodal_normalizes_images():
+    client = FakeOllamaClient()
+    adapter = OllamaAdapter(client=client)
+
+    adapter.chat(
+        ChatRequest(
+            model="llava",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What is this?"},
+                        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,aGVsbG8="}},
+                    ],
+                }
+            ],
+        )
+    )
+
+    assert client.chat_kwargs is not None
+    messages = client.chat_kwargs["messages"]
+    assert len(messages) == 1
+    assert messages[0]["content"] == "What is this?"
+    assert messages[0]["images"] == ["aGVsbG8="]
+
+
+def test_llamacpp_multimodal_normalizes_images_and_downloads_mmproj():
+    downloads: list[dict[str, Any]] = []
+
+    def download(**kwargs: Any) -> str:
+        downloads.append(kwargs)
+        return f"/models/{kwargs['filename']}"
+
+    adapter = LlamaCPPAdapter(llama_factory=FakeLlama, hub_download=download)
+    request = ChatRequest(
+        model="owner/llava-model",
+        messages=[{"role": "user", "content": "Analyze", "images": [b"raw_bytes"]}],
+        model_source=ModelSource(filename="model.gguf", mmproj_filename="mmproj.gguf"),
+    )
+
+    adapter.chat(request)
+
+    # Both model and mmproj downloaded
+    downloaded_files = [d["filename"] for d in downloads]
+    assert "model.gguf" in downloaded_files
+    assert "mmproj.gguf" in downloaded_files
+
+    # Formatted to OpenAI image_url content list
+    chat_kwargs = FakeLlama.instances[-1].chat_kwargs
+    assert chat_kwargs is not None
+    msg = chat_kwargs["messages"][0]
+    assert isinstance(msg["content"], list)
+    assert msg["content"][0] == {"type": "text", "text": "Analyze"}
+    assert msg["content"][1]["type"] == "image_url"
+    assert msg["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")

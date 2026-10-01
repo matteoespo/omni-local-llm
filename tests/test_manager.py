@@ -158,3 +158,35 @@ def test_manager_structured_output_parse_error():
             messages=[],
             response_model=Character,
         )
+
+
+def test_manager_vision_validation_unsupported_backend():
+    from omnillm.core.types import BackendCapabilities
+
+    backend = RecordingBackend()
+    backend.capabilities = BackendCapabilities(vision=False)
+    manager = LocalLLMManager({"fake": backend})
+
+    with pytest.raises(UnsupportedFeatureError, match="does not support vision"):
+        manager.chat(
+            backend="fake",
+            model="test-model",
+            messages=[{"role": "user", "content": "What is this?", "images": ["data:image/png;base64,AAAA"]}],
+        )
+
+
+def test_manager_forwards_vision_options():
+    backend = RecordingBackend()
+    manager = LocalLLMManager({"fake": backend})
+
+    manager.chat(
+        backend="fake",
+        model="test-model",
+        messages=[{"role": "user", "content": "hello"}],
+        mmproj_filename="mmproj.gguf",
+        clip_model_path="/path/to/clip",
+    )
+
+    request = backend.requests[0]
+    assert request.model_source.mmproj_filename == "mmproj.gguf"
+    assert request.runtime.clip_model_path == "/path/to/clip"

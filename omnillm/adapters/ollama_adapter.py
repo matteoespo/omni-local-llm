@@ -4,6 +4,7 @@ from typing import Any
 
 from omnillm.core.base import LLMBackend
 from omnillm.core.errors import BackendUnavailableError
+from omnillm.core.media import normalize_messages_for_ollama
 from omnillm.core.types import (
     ChatChunk,
     ChatRequest,
@@ -103,7 +104,7 @@ class OllamaAdapter(LLMBackend):
         }
         kwargs: dict[str, Any] = {
             "model": request.model,
-            "messages": list(request.messages),
+            "messages": normalize_messages_for_ollama(request.messages),
             "stream": request.stream,
         }
         if options:

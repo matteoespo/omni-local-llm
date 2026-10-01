@@ -11,6 +11,7 @@ from omnillm.core.errors import (
     InvalidRequestError,
     UnsupportedFeatureError,
 )
+from omnillm.core.media import has_images
 from omnillm.core.types import (
     AsyncChatResult,
     ChatMessage,
@@ -141,6 +142,8 @@ class LocalLLMManager:
         local_files_only: bool,
         n_gpu_layers: int | None,
         n_ctx: int | None,
+        mmproj_filename: str | None = None,
+        clip_model_path: str | None = None,
     ) -> tuple[LLMBackend, ChatRequest]:
         if not model:
             raise ValueError("A model name is required.")
@@ -156,6 +159,8 @@ class LocalLLMManager:
             raise UnsupportedFeatureError(f"Backend '{backend}' does not support structured outputs.")
         if tools and not adapter.capabilities.tools:
             raise UnsupportedFeatureError(f"Backend '{backend}' does not support tool calling.")
+        if has_images(messages) and not getattr(adapter.capabilities, "vision", True):
+            raise UnsupportedFeatureError(f"Backend '{backend}' does not support vision / multimodal inputs.")
         return adapter, ChatRequest(
             model=model,
             messages=messages,
@@ -167,8 +172,8 @@ class LocalLLMManager:
             max_tokens=max_tokens,
             top_p=top_p,
             stop=stop,
-            model_source=ModelSource(filename, revision, cache_dir, local_files_only),
-            runtime=RuntimeOptions(n_gpu_layers, n_ctx),
+            model_source=ModelSource(filename, revision, cache_dir, local_files_only, mmproj_filename),
+            runtime=RuntimeOptions(n_gpu_layers, n_ctx, clip_model_path),
         )
 
     def chat(
@@ -192,6 +197,8 @@ class LocalLLMManager:
         local_files_only: bool = False,
         n_gpu_layers: int | None = None,
         n_ctx: int | None = None,
+        mmproj_filename: str | None = None,
+        clip_model_path: str | None = None,
     ) -> ChatResult:
         adapter, request = self._make_request(
             backend,
@@ -212,6 +219,8 @@ class LocalLLMManager:
             local_files_only=local_files_only,
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
+            mmproj_filename=mmproj_filename,
+            clip_model_path=clip_model_path,
         )
         result = adapter.chat(request)
         return _attach_parsed_model(result, response_model)
@@ -237,6 +246,8 @@ class LocalLLMManager:
         local_files_only: bool = False,
         n_gpu_layers: int | None = None,
         n_ctx: int | None = None,
+        mmproj_filename: str | None = None,
+        clip_model_path: str | None = None,
     ) -> AsyncChatResult:
         adapter, request = self._make_request(
             backend,
@@ -257,6 +268,8 @@ class LocalLLMManager:
             local_files_only=local_files_only,
             n_gpu_layers=n_gpu_layers,
             n_ctx=n_ctx,
+            mmproj_filename=mmproj_filename,
+            clip_model_path=clip_model_path,
         )
         result = await adapter.achat(request)
         return _attach_parsed_model(result, response_model)

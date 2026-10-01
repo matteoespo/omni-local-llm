@@ -17,6 +17,7 @@ class ModelSource:
     revision: str | None = None
     cache_dir: str | None = None
     local_files_only: bool = False
+    mmproj_filename: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class RuntimeOptions:
 
     n_gpu_layers: int | None = None
     n_ctx: int | None = None
+    clip_model_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +170,7 @@ class BackendCapabilities:
     tools: bool = True
     embeddings: bool = True
     structured_outputs: bool = True
+    vision: bool = True
 
 
 type ChatResult = ChatResponse | Iterator[ChatChunk]

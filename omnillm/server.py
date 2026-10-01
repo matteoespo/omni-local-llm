@@ -20,7 +20,8 @@ from omnillm.core.types import ChatChunk, ChatResponse
 
 class ChatMessage(BaseModel):
     role: Literal["system", "developer", "user", "assistant", "tool"]
-    content: str | None = None
+    content: str | list[dict[str, Any]] | None = None
+    images: list[str] | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
 

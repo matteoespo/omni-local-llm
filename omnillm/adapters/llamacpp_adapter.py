@@ -4,6 +4,7 @@ from typing import Any
 
 from omnillm.core.base import LLMBackend
 from omnillm.core.errors import BackendUnavailableError, InvalidRequestError
+from omnillm.core.media import normalize_messages_for_openai
 from omnillm.core.types import (
     ChatChunk,
     ChatRequest,
@@ -65,7 +66,7 @@ class LlamaCPPAdapter(LLMBackend):
     ):
         self._llama_factory = llama_factory if llama_factory is not None else Llama
         self._hub_download = hub_download if hub_download is not None else hf_hub_download
-        self._active_key: tuple[str, ModelSource, bool] | None = None
+        self._active_key: tuple[str, ModelSource, bool, str | None] | None = None
         self._llm: Any | None = None
 
     def _require_dependencies(self) -> tuple[Callable[..., Any], Callable[..., str]]:
@@ -79,6 +80,14 @@ class LlamaCPPAdapter(LLMBackend):
         if not source.filename:
             raise InvalidRequestError("llama.cpp requires a Hugging Face GGUF filename.")
         _, hub_download = self._require_dependencies()
+        if source.mmproj_filename:
+            hub_download(
+                repo_id=model_name,
+                filename=source.mmproj_filename,
+                revision=source.revision,
+                cache_dir=source.cache_dir,
+                local_files_only=source.local_files_only,
+            )
         return hub_download(
             repo_id=model_name,
             filename=source.filename,
@@ -88,11 +97,24 @@ class LlamaCPPAdapter(LLMBackend):
         )
 
     def _load_model(self, request: ChatRequest | EmbeddingRequest, embedding: bool = False) -> Any:
-        key = (request.model, request.model_source, embedding)
+        clip_path: str | None = None
+        llama_factory, hub_download = self._require_dependencies()
+        if isinstance(request, ChatRequest):
+            if request.runtime.clip_model_path:
+                clip_path = request.runtime.clip_model_path
+            elif request.model_source.mmproj_filename:
+                clip_path = hub_download(
+                    repo_id=request.model,
+                    filename=request.model_source.mmproj_filename,
+                    revision=request.model_source.revision,
+                    cache_dir=request.model_source.cache_dir,
+                    local_files_only=request.model_source.local_files_only,
+                )
+
+        key = (request.model, request.model_source, embedding, clip_path)
         if self._active_key == key and self._llm is not None:
             return self._llm
 
-        llama_factory, _ = self._require_dependencies()
         model_path = self.pull_model(request.model, request.model_source)
         runtime_kwargs: dict[str, Any] = {
             "model_path": model_path,
@@ -103,13 +125,23 @@ class LlamaCPPAdapter(LLMBackend):
             runtime_kwargs["n_ctx"] = request.runtime.n_ctx
         if embedding:
             runtime_kwargs["embedding"] = True
+        if clip_path is not None:
+            try:
+                from llama_cpp.llama_chat_format import Llava15ChatHandler
+
+                runtime_kwargs["chat_handler"] = Llava15ChatHandler(clip_model_path=clip_path)
+            except Exception:
+                runtime_kwargs["clip_model_path"] = clip_path
         self._llm = llama_factory(**runtime_kwargs)
         self._active_key = key
         return self._llm
 
     @staticmethod
     def _chat_kwargs(request: ChatRequest) -> dict[str, Any]:
-        kwargs: dict[str, Any] = {"messages": list(request.messages), "stream": request.stream}
+        kwargs: dict[str, Any] = {
+            "messages": normalize_messages_for_openai(request.messages),
+            "stream": request.stream,
+        }
         for key, value in {
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,

@@ -197,3 +197,17 @@ def test_session_busy_state_prevents_concurrent_operations():
         session.reset()
 
     session._release_turn()
+
+
+def test_session_multimodal_image_send():
+    backend = RecordingBackend(response=ChatResponse(content="It is a golden retriever."))
+    session = LocalLLMManager({"fake": backend}).create_session("fake", "model")
+
+    response = session.send("What dog is this?", images=["dog.jpg"])
+
+    assert response.content == "It is a golden retriever."
+    assert len(session.messages) == 2
+    assert session.messages[0]["images"] == ["dog.jpg"]
+    assert session.messages[0]["content"] == "What dog is this?"
+    # Check that estimated_tokens accounts for image tokens
+    assert session.estimated_tokens > 250

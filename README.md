@@ -34,6 +34,7 @@
 | Feature | Description |
 |---|---|
 | **Multi-Backend** | Swap between [Ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggerganov/llama.cpp) with a single parameter change |
+| **Vision & Multimodal** | Native image understanding across Ollama and llama.cpp (file paths, bytes, data URIs, and OpenAI format) |
 | **Chat Sessions & Pruning** | Resilient turn commits, sliding-window turn pruning, token budget enforcement, and thread-safe resets |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling** | Native function/tool calling support across backends |
@@ -315,6 +316,55 @@ response = await manager.aembed(
     backend="ollama",
     model="nomic-embed-text",
     input=["Async batch embedding"]
+)
+```
+
+#### Vision & Multimodal (Image Understanding)
+
+Run local multimodal models (such as `llava`, `llama3.2-vision`, or `qwen2-vl`) using local file paths, raw bytes, base64 data URIs, or OpenAI-standard image parts:
+
+```python
+# Direct image input via file path or bytes (Ollama)
+response = manager.chat(
+    backend="ollama",
+    model="llava",
+    messages=[{
+        "role": "user",
+        "content": "What is depicted in this photo?",
+        "images": ["photo.jpg"],  # accepts file paths, Path objects, base64, or bytes
+    }]
+)
+print(response.content)
+
+# Using llama.cpp with Hugging Face GGUF + multimodal projector (mmproj)
+response = manager.chat(
+    backend="llama.cpp",
+    model="myself/llava-1.5-7b-GGUF",
+    filename="llava-1.5-7b-Q4_K.gguf",
+    mmproj_filename="mmproj-model-f16.gguf",  # automatically downloaded & loaded
+    messages=[{
+        "role": "user",
+        "content": "Analyze this chart.",
+        "images": ["chart.png"],
+    }]
+)
+
+# In ChatSession with conversational memory
+session = manager.create_session(backend="ollama", model="llava")
+response = session.send("What is in this image?", images=["invoice.png"])
+response2 = session.send("Extract the total amount.")  # Remembers the image context!
+
+# OpenAI-compatible multi-part format (also supported via FastAPI server)
+response = manager.chat(
+    backend="ollama",
+    model="llava",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this image in detail:"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+        ]
+    }]
 )
 ```
 

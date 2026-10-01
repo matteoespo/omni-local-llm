@@ -155,3 +155,29 @@ def test_embeddings_endpoint_validates_input_and_encoding():
     assert "Only float encoding_format is supported" in bad_encoding.json()["error"]["message"]
     assert empty_input.status_code == 400
     assert "Embedding input must contain non-empty strings" in empty_input.json()["error"]["message"]
+
+
+def test_multimodal_chat_completions():
+    backend = RecordingBackend(response=ChatResponse(content="I see a cat."))
+    client = make_client(backend)
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "fake/llava",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What is this?"},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"]["content"] == "I see a cat."
+    assert len(backend.requests[0].messages) == 1
+    assert isinstance(backend.requests[0].messages[0]["content"], list)
