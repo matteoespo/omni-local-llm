@@ -1,5 +1,8 @@
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+if TYPE_CHECKING:
+    from omnillm.core.session import ChatSession
 
 from omnillm.core.base import LLMBackend
 from omnillm.core.errors import (
@@ -346,11 +349,28 @@ class LocalLLMManager:
         )
         return await adapter.aembed(request)
 
-    def create_session(self, backend: str, model: str, system_prompt: str | None = None):
+    def create_session(
+        self,
+        backend: str,
+        model: str,
+        system_prompt: str | None = None,
+        *,
+        max_turns: int | None = None,
+        max_tokens_budget: int | None = None,
+        strategy: Literal["full", "sliding_window"] = "full",
+    ) -> "ChatSession":
         from omnillm.core.session import ChatSession
 
         self._get_backend(backend)
-        return ChatSession(manager=self, backend=backend, model=model, system_prompt=system_prompt)
+        return ChatSession(
+            manager=self,
+            backend=backend,
+            model=model,
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            max_tokens_budget=max_tokens_budget,
+            strategy=strategy,
+        )
 
     def list_models(self, backend: str | None = None) -> list[tuple[str, str]]:
         names = (backend,) if backend else self.backend_names

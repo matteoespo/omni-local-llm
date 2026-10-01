@@ -34,7 +34,7 @@
 | Feature | Description |
 |---|---|
 | **Multi-Backend** | Swap between [Ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggerganov/llama.cpp) with a single parameter change |
-| **Chat Sessions** | Built-in conversation memory and history management |
+| **Chat Sessions & Pruning** | Resilient turn commits, sliding-window turn pruning, token budget enforcement, and thread-safe resets |
 | **Streaming** | Real-time token-by-token streaming (sync & async) |
 | **Tool Calling** | Native function/tool calling support across backends |
 | **Structured Outputs** | Guaranteed JSON schema adherence and Pydantic validation via GBNF or Ollama schemas |
@@ -161,17 +161,32 @@ response = manager.chat(
 print(response.content)
 ```
 
-#### Chat Session (with Memory)
+#### Chat Session (with Memory & Context Window Pruning)
+
+`ChatSession` maintains conversation history, commits turns only on success, and supports proactive sliding-window context pruning to keep local models within their context limits:
 
 ```python
+# Create a session with turn and token budget constraints
 session = manager.create_session(
     backend="ollama",
     model="llama3",
-    system_prompt="You are a helpful assistant."
+    system_prompt="You are a helpful coding assistant.",
+    max_turns=10,             # Keep the most recent 10 conversational turns
+    max_tokens_budget=4096,   # Automatically evict oldest turns before exceeding context budget
+    strategy="sliding_window",
 )
 
+# System prompt is ALWAYS preserved during pruning
 response1 = session.send("Hello, I am Bob.")
 response2 = session.send("What is my name?")  # Remembers "Bob"
+
+# Inspection properties
+print(f"Stored turns: {session.turn_count}")
+print(f"Estimated token footprint: {session.estimated_tokens}")
+
+# Reset / clear controls
+session.clear()                # Clears history, keeping original system_prompt
+session.reset("New prompt")    # Clears history and updates system prompt
 ```
 
 #### Async & Streaming
