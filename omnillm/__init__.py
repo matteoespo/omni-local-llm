@@ -1,5 +1,6 @@
 from .core.manager import LocalLLMManager
 from .core.session import ChatSession
+from .core.types import ChatChunk, ChatRequest, ChatResponse, Usage
 
-__version__ = "0.1.0"
-__all__ = ["LocalLLMManager", "ChatSession"]
+__version__ = "0.2.0"
+__all__ = ["ChatChunk", "ChatRequest", "ChatResponse", "ChatSession", "LocalLLMManager", "Usage"]

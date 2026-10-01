@@ -1,6 +1,6 @@
 [project]
 name = "omni-local-llm"
-version = "0.1.0"
+version = "0.2.0"
 description = "A unified Python interface and API server for running local Large Language Models."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,10 +33,22 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-dependencies = [
+dependencies = []
+
+[project.optional-dependencies]
+ollama = ["ollama>=0.6.2"]
+llama-cpp = [
     "huggingface-hub>=1.15.0",
     "llama-cpp-python>=0.3.23",
+]
+server = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.1",
+]
+all = [
     "ollama>=0.6.2",
+    "huggingface-hub>=1.15.0",
+    "llama-cpp-python>=0.3.23",
     "fastapi>=0.111.0",
     "uvicorn>=0.30.1",
 ]
@@ -48,7 +60,8 @@ Issues = "https://github.com/matteoespo/omni-local-llm/issues"
 
 [dependency-groups]
 dev = [
-    "omni-local-llm",
+    "omni-local-llm[all]",
+    "mypy>=1.15",
     "pytest>=9.0.3",
     "pytest-asyncio",
     "pytest-cov>=6.0",
@@ -86,6 +99,15 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["omnillm"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["huggingface_hub", "llama_cpp", "ollama"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

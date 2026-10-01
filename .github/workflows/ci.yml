@@ -58,11 +58,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # TODO: Enable once mypy/pyright is configured in pyproject.toml
-      # - name: Run type checker
-      #   run: uv run mypy omnillm/
-      - name: Type check placeholder
-        run: echo "Type checking not yet configured – skipping"
+      - name: Run type checker
+        run: uv run mypy omnillm/
 
   test:
     name: Test (Python ${{ matrix.python-version }})

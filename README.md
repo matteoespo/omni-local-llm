@@ -48,10 +48,10 @@
 
 ```bash
 # Install
-pip install omni-local-llm
+pip install "omni-local-llm[ollama,server]"
 
 # Or with uv (recommended)
-uv pip install omni-local-llm
+uv pip install "omni-local-llm[ollama,server]"
 ```
 
 ```python
@@ -63,7 +63,7 @@ response = manager.chat(
     model="llama3",
     messages=[{"role": "user", "content": "Hello!"}]
 )
-print(response)
+print(response.content)
 ```
 
 **That's it.** Switch to llama.cpp by changing one word:
@@ -128,15 +128,15 @@ response = manager.chat(
 ```bash
 git clone https://github.com/matteoespo/omni-local-llm.git
 cd omni-local-llm
-uv pip install -e .
+uv pip install -e ".[ollama,server]"
 ```
 
 ### Install from PyPI
 
 ```bash
-pip install omni-local-llm
+pip install "omni-local-llm[ollama,server]"
 # or
-uv pip install omni-local-llm
+uv pip install "omni-local-llm[ollama,server]"
 ```
 
 ---
@@ -157,7 +157,7 @@ response = manager.chat(
     model="llama3",
     messages=[{"role": "user", "content": "Hello!"}]
 )
-print(response)
+print(response.content)
 ```
 
 #### Chat Session (with Memory)
@@ -214,7 +214,7 @@ response = manager.chat(
     messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
     tools=tools
 )
-# response["tool_calls"] contains the function call
+# response.tool_calls contains the function call
 ```
 
 #### JSON Mode
@@ -226,7 +226,7 @@ response = manager.chat(
     messages=[{"role": "user", "content": "List 3 colors as JSON"}],
     json_mode=True
 )
-# Returns valid JSON string
+# response.content contains a JSON string
 ```
 
 ---
@@ -302,6 +302,9 @@ pytest
 
 # With coverage
 uv run pytest --cov=omnillm --cov-report=term-missing
+
+# Type checking
+uv run mypy omnillm
 ```
 
 ---

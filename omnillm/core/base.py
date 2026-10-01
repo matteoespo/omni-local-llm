@@ -1,34 +1,26 @@
 from abc import ABC, abstractmethod
 
+from omnillm.core.types import AsyncChatResult, BackendCapabilities, ChatRequest, ChatResult, ModelSource
+
 
 class LLMBackend(ABC):
+    capabilities = BackendCapabilities()
+
     @abstractmethod
-    def pull_model(self, model_name: str, **kwargs):
+    def pull_model(self, model_name: str, source: ModelSource) -> str | None:
         """Downloads the model if it doesn't exist locally."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
-    def chat(
-        self,
-        model_name: str,
-        messages: list,
-        stream: bool = False,
-        json_mode: bool = False,
-        tools: list = None,
-        **kwargs,
-    ):
-        """Sends a prompt to the model and returns the response (or a generator if stream=True)."""
-        pass
+    def chat(self, request: ChatRequest) -> ChatResult:
+        """Sends a backend-neutral request and returns a response or stream of chunks."""
+        raise NotImplementedError
 
     @abstractmethod
-    async def achat(
-        self,
-        model_name: str,
-        messages: list,
-        stream: bool = False,
-        json_mode: bool = False,
-        tools: list = None,
-        **kwargs,
-    ):
+    async def achat(self, request: ChatRequest) -> AsyncChatResult:
         """Asynchronous version of chat."""
-        pass
+        raise NotImplementedError
+
+    def list_models(self) -> list[str]:
+        """Returns models known to the backend without requiring callers to know its SDK."""
+        return []

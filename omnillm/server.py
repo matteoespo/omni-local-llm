@@ -1,121 +1,204 @@
 import json
 import time
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Any, Literal
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
+from omnillm.core.errors import (
+    BackendNotFoundError,
+    BackendUnavailableError,
+    InvalidRequestError,
+    UnsupportedFeatureError,
+)
 from omnillm.core.manager import LocalLLMManager
-
-app = FastAPI(title="Omni-Local-LLM OpenAI API", version="0.1.0")
-manager = LocalLLMManager()
+from omnillm.core.types import ChatChunk, ChatResponse
 
 
 class ChatMessage(BaseModel):
-    role: str
+    role: Literal["system", "developer", "user", "assistant", "tool"]
     content: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
 
 
 class ResponseFormat(BaseModel):
-    type: str
+    type: Literal["text", "json_object"] = "text"
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: list[ChatMessage]
-    stream: bool | None = False
+    model: str = Field(min_length=1)
+    messages: list[ChatMessage] = Field(min_length=1)
+    stream: bool = False
     response_format: ResponseFormat | None = None
-    temperature: float | None = 0.7
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1)
+    top_p: float | None = Field(default=None, gt=0, le=1)
+    stop: str | list[str] | None = None
     tools: list[dict[str, Any]] | None = None
+    n: int = Field(default=1, ge=1)
 
 
-def parse_model_string(model_string: str):
-    """Parses 'backend/model_name' into backend and model. Defaults to ollama."""
-    parts = model_string.split("/", 1)
-    if len(parts) == 2:
-        return parts[0], parts[1]
-    return "ollama", model_string
+def parse_model_string(model_string: str) -> tuple[str, str]:
+    """Parses 'backend/model_name' into a registered backend and model name."""
+    if "/" not in model_string:
+        return "ollama", model_string
+    backend, model = model_string.split("/", 1)
+    if not backend or not model:
+        raise InvalidRequestError("Model must be 'backend/model' or a non-empty Ollama model name.")
+    return backend, model
 
 
-@app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
-    backend, model_name = parse_model_string(request.model)
+def _error_response(error: Exception) -> JSONResponse:
+    status_code = 500
+    error_type = "server_error"
+    if isinstance(error, BackendNotFoundError):
+        status_code, error_type = 404, "invalid_request_error"
+    elif isinstance(error, BackendUnavailableError):
+        status_code, error_type = 503, "server_error"
+    elif isinstance(error, (InvalidRequestError, UnsupportedFeatureError, ValueError)):
+        status_code, error_type = 400, "invalid_request_error"
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"message": str(error), "type": error_type}},
+    )
 
-    messages_dict = []
-    for m in request.messages:
-        d = {"role": m.role}
-        if m.content is not None:
-            d["content"] = m.content
-        if m.tool_calls is not None:
-            d["tool_calls"] = m.tool_calls
-        if m.tool_call_id is not None:
-            d["tool_call_id"] = m.tool_call_id
-        messages_dict.append(d)
 
-    json_mode = False
-    if request.response_format and request.response_format.type == "json_object":
-        json_mode = True
+def _sse(data: dict[str, Any]) -> str:
+    return f"data: {json.dumps(data)}\n\n"
 
-    try:
-        response = await manager.achat(
-            backend=backend,
-            model=model_name,
-            messages=messages_dict,
-            stream=request.stream,
-            json_mode=json_mode,
-            tools=request.tools,
-            temperature=request.temperature,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
-    created_time = int(time.time())
+def create_app(manager: LocalLLMManager | None = None) -> FastAPI:
+    app = FastAPI(title="Omni-Local-LLM OpenAI API", version="0.2.0")
+    llm_manager = manager or LocalLLMManager()
 
-    if request.stream:
-
-        async def stream_generator():
-            async for chunk in response:
-                chunk_data = {
-                    "id": "chatcmpl-123",
-                    "object": "chat.completion.chunk",
-                    "created": created_time,
-                    "model": request.model,
-                    "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+    @app.get("/v1/models", response_model=None)
+    async def list_models() -> JSONResponse | dict[str, Any]:
+        try:
+            models = [
+                {
+                    "id": f"{backend}/{model}",
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": backend,
                 }
-                yield f"data: {json.dumps(chunk_data)}\n\n"
+                for backend, model in llm_manager.list_models()
+            ]
+        except Exception as error:
+            return _error_response(error)
+        return {"object": "list", "data": models}
 
-            yield "data: [DONE]\n\n"
+    @app.post("/v1/chat/completions", response_model=None)
+    async def chat_completions(request: ChatCompletionRequest) -> JSONResponse | StreamingResponse | dict[str, Any]:
+        if request.n != 1:
+            return _error_response(InvalidRequestError("Only n=1 is supported."))
 
-        return StreamingResponse(stream_generator(), media_type="text/event-stream")
-    else:
-        message_dict = {"role": "assistant"}
-        if isinstance(response, dict):
-            message_dict["content"] = response.get("content", "")
-            if response.get("tool_calls"):
-                message_dict["tool_calls"] = response["tool_calls"]
-        else:
-            message_dict["content"] = response
+        try:
+            backend, model_name = parse_model_string(request.model)
+            response = await llm_manager.achat(
+                backend=backend,
+                model=model_name,
+                messages=[message.model_dump(exclude_none=True) for message in request.messages],
+                stream=request.stream,
+                json_mode=request.response_format is not None and request.response_format.type == "json_object",
+                tools=request.tools,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                top_p=request.top_p,
+                stop=request.stop,
+            )
+        except Exception as error:
+            return _error_response(error)
 
-        return {
-            "id": "chatcmpl-123",
+        chat_id = f"chatcmpl-{uuid4().hex}"
+        created = int(time.time())
+
+        if request.stream:
+            if not isinstance(response, AsyncIterator):
+                return _error_response(InvalidRequestError("Backend did not return a stream."))
+
+            async def stream() -> AsyncIterator[str]:
+                finish_reason = "stop"
+                yield _sse(
+                    {
+                        "id": chat_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": request.model,
+                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                    }
+                )
+                try:
+                    async for chunk in response:
+                        if not isinstance(chunk, ChatChunk):
+                            raise InvalidRequestError("Backend returned an invalid stream chunk.")
+                        delta: dict[str, Any] = {}
+                        if chunk.content:
+                            delta["content"] = chunk.content
+                        if chunk.tool_calls:
+                            delta["tool_calls"] = list(chunk.tool_calls)
+                            finish_reason = "tool_calls"
+                        if chunk.finish_reason is not None:
+                            finish_reason = chunk.finish_reason
+                        if delta:
+                            yield _sse(
+                                {
+                                    "id": chat_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created,
+                                    "model": request.model,
+                                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                                }
+                            )
+                    yield _sse(
+                        {
+                            "id": chat_id,
+                            "object": "chat.completion.chunk",
+                            "created": created,
+                            "model": request.model,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                        }
+                    )
+                except Exception as error:
+                    payload = bytes(_error_response(error).body).decode()
+                    yield f"data: {payload}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(stream(), media_type="text/event-stream")
+
+        if not isinstance(response, ChatResponse):
+            return _error_response(InvalidRequestError("Backend returned a stream."))
+
+        message: dict[str, Any] = {"role": "assistant", "content": response.content}
+        if response.tool_calls:
+            message["tool_calls"] = list(response.tool_calls)
+        payload: dict[str, Any] = {
+            "id": chat_id,
             "object": "chat.completion",
-            "created": created_time,
+            "created": created,
             "model": request.model,
             "choices": [
                 {
                     "index": 0,
-                    "message": message_dict,
-                    "finish_reason": "tool_calls" if message_dict.get("tool_calls") else "stop",
+                    "message": message,
+                    "finish_reason": response.finish_reason,
                 }
             ],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         }
+        if response.usage is not None and (usage := response.usage.as_openai()) is not None:
+            payload["usage"] = usage
+        return payload
+
+    return app
+
+
+app = create_app()
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)
