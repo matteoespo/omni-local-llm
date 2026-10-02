@@ -6,7 +6,7 @@ template: |
 
   $CHANGES
 
-  **Full Changelog**: https://github.com/matteoespo/lazy-llm/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+  **Full Changelog**: https://github.com/matteoespo/omni-local-llm/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
 
 categories:
   - title: "🚀 Features"

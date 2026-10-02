@@ -16,7 +16,7 @@ body:
       label: Pre-flight Checklist
       description: Please confirm the following before submitting.
       options:
-        - label: I have searched the [existing issues](https://github.com/matteoespo/lazy-llm/issues) and this bug has not been reported yet.
+        - label: I have searched the [existing issues](https://github.com/matteoespo/omni-local-llm/issues) and this bug has not been reported yet.
           required: true
         - label: I am using the latest version of Omni-Local-LLM.
           required: true

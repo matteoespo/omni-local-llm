@@ -16,7 +16,7 @@ body:
       label: Pre-flight Checklist
       description: Please confirm the following before submitting.
       options:
-        - label: I have searched the [existing issues](https://github.com/matteoespo/lazy-llm/issues) and this feature has not been requested yet.
+        - label: I have searched the [existing issues](https://github.com/matteoespo/omni-local-llm/issues) and this feature has not been requested yet.
           required: true
 
   - type: textarea

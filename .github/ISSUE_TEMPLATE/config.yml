@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 Question & Discussion
-    url: https://github.com/matteoespo/lazy-llm/discussions
+    url: https://github.com/matteoespo/omni-local-llm/discussions
     about: Ask questions, share ideas, or start a discussion with the community.
   - name: 📖 Documentation
-    url: https://github.com/matteoespo/lazy-llm#readme
+    url: https://github.com/matteoespo/omni-local-llm#readme
     about: Check out the README and documentation before opening an issue.
