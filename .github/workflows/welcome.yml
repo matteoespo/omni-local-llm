@@ -16,22 +16,22 @@ jobs:
     steps:
       - uses: actions/first-interaction@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: |
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |
             👋 Welcome to **Omni-Local-LLM**, @${{ github.actor }}! Thanks for opening your first issue.
 
             A maintainer will review this soon. In the meantime:
             - Make sure you've filled out all the required fields in the issue template
-            - Check the [README](https://github.com/matteoespo/lazy-llm#readme) for common setup steps
-            - Browse [existing issues](https://github.com/matteoespo/lazy-llm/issues) for related discussions
+            - Check the [README](https://github.com/matteoespo/omni-local-llm#readme) for common setup steps
+            - Browse [existing issues](https://github.com/matteoespo/omni-local-llm/issues) for related discussions
 
             We appreciate your contribution! 🙏
-          pr-message: |
+          pr_message: |
             👋 Welcome to **Omni-Local-LLM**, @${{ github.actor }}! Thanks for opening your first pull request.
 
             A maintainer will review your changes shortly. Please make sure:
             - [ ] Tests pass locally (`pytest`)
             - [ ] Code follows the project's style
-            - [ ] You've read the [Contributing Guide](https://github.com/matteoespo/lazy-llm/blob/main/CONTRIBUTING.md)
+            - [ ] You've read the [Contributing Guide](https://github.com/matteoespo/omni-local-llm/blob/main/CONTRIBUTING.md)
 
             Thanks for helping improve Omni-Local-LLM! 🚀
