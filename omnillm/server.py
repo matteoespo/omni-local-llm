@@ -69,13 +69,13 @@ def _error_response(error: Exception) -> JSONResponse:
     message = "An internal error has occurred."
     if isinstance(error, BackendNotFoundError):
         status_code, error_type = 404, "invalid_request_error"
-        message = str(error)
+        message = "The requested backend or model was not found."
     elif isinstance(error, BackendUnavailableError):
         status_code, error_type = 503, "server_error"
         message = "The requested backend is currently unavailable."
     elif isinstance(error, (InvalidRequestError, UnsupportedFeatureError, ValueError)):
         status_code, error_type = 400, "invalid_request_error"
-        message = str(error)
+        message = "The request is invalid or unsupported."
     return JSONResponse(
         status_code=status_code,
         content={"error": {"message": message, "type": error_type}},
