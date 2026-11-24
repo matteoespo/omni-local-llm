@@ -70,7 +70,7 @@ Issues = "https://github.com/matteoespo/omni-local-llm/issues"
 
 [dependency-groups]
 dev = [
-    "omni-local-llm[all]",
+    "omni-local-llm[server,ollama,openai]",
     "mypy>=1.15",
     "pytest>=9.0.3",
     "pytest-asyncio",
@@ -116,7 +116,7 @@ check_untyped_defs = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["huggingface_hub", "llama_cpp", "ollama"]
+module = ["huggingface_hub", "huggingface_hub.*", "llama_cpp", "llama_cpp.*", "ollama"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -666,7 +666,7 @@ server = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
-    { name = "omni-local-llm", extra = ["all"] },
+    { name = "omni-local-llm", extra = ["ollama", "openai", "server"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -694,7 +694,7 @@ provides-extras = ["ollama", "openai", "llama-cpp", "server", "all"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.15" },
-    { name = "omni-local-llm", extras = ["all"], editable = "." },
+    { name = "omni-local-llm", extras = ["server", "ollama", "openai"], editable = "." },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov", specifier = ">=6.0" },

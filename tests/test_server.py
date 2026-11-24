@@ -85,6 +85,33 @@ def test_models_endpoint_lists_models_from_available_backends():
     assert [model["id"] for model in response.json()["data"]] == ["fake/one", "fake/two"]
 
 
+def test_health_endpoint_does_not_query_backends(monkeypatch):
+    manager = LocalLLMManager({"fake": RecordingBackend()})
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Health check must not query backends")
+
+    monkeypatch.setattr(manager, "list_models", fail_if_called)
+
+    client = local_client(create_app(manager))
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_health_endpoint_respects_host_validation():
+    manager = LocalLLMManager({"fake": RecordingBackend()})
+    app = create_app(manager)
+
+    evil_client = TestClient(app, base_url="http://attacker.example")
+    assert evil_client.get("/health").status_code == 400
+
+    good_client = TestClient(app, base_url="http://localhost")
+    assert good_client.get("/health").status_code == 200
+    assert good_client.get("/health").json() == {"status": "ok"}
+
+
 def test_streaming_response_has_role_chunks_finish_reason_and_done_marker():
     backend = RecordingBackend(chunks=(ChatChunk(content="Hello"), ChatChunk(content="!", finish_reason="stop")))
     client = make_client(backend)

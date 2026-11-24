@@ -39,11 +39,11 @@ This project follows the [Contributor Covenant Code of Conduct, version 2.1](htt
    git clone https://github.com/<your-username>/omni-local-llm.git
    cd omni-local-llm
    ```
-3. **Install the package with all extras and the dev tools** (pytest, ruff, mypy):
+3. **Install the package and the dev tools** (pytest, ruff, mypy):
    ```bash
    uv sync
    ```
-   This creates `.venv/` from the lockfile; `uv run <command>` uses it automatically. The first sync compiles `llama-cpp-python`, which can take a few minutes (you need a C/C++ compiler and CMake).
+   This creates `.venv/` from the lockfile with the `server`, `ollama` and `openai` extras; `uv run <command>` uses it automatically. The llama.cpp backend isn't installed by default, because `llama-cpp-python` compiles on install (it needs a C/C++ compiler and CMake, and takes a few minutes). The test suite doesn't need it. To work on the llama.cpp adapter, run `uv sync --extra llama-cpp`.
 4. **Verify everything works:**
    ```bash
    uv run pytest

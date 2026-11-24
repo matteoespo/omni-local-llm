@@ -125,3 +125,19 @@ jobs:
           # The headline command must read real Hugging Face data from a bare install (tolerate a Hub outage).
           /tmp/smoke/bin/omnillm fit bartowski/SmolLM2-135M-Instruct-GGUF --json > fit.json
           /tmp/smoke/bin/python -I -c "import json; d = json.load(open('fit.json')); n = ' '.join(d['notes']); assert d['source'] == 'huggingface-gguf' or 'Cannot reach Hugging Face' in n, (d['source'], n); print('fit source:', d['source'])"
+
+  docker-build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: omni-local-llm:latest

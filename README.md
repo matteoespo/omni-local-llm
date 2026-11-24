@@ -141,6 +141,7 @@ The core package depends only on `httpx`, and `fit` works without any extras. Re
 | [Python SDK](docs/sdk.md) | Chat, sessions, streaming, tools, structured outputs, embeddings, vision |
 | [CLI](docs/cli.md) | `chat`, `run`, `models`, `bench`, `eval`, `serve`, `fit` |
 | [API server](docs/server.md) | OpenAI SDK and curl usage, errors, host check |
+| [Docker deployment](docs/docker.md) | Dockerfile, docker-compose, config mounting, host Ollama, security |
 | [Benchmarks & evals](docs/harness.md) | `BenchmarkHarness`, `EvalHarness`, `NeedleHarness` |
 | [Architecture](docs/architecture.md) | Module map, running tests |
 
@@ -151,7 +152,7 @@ The live roadmap is in the pinned [Roadmap & feedback](https://github.com/matteo
 - [ ] `omnillm pick`: rank the models that fit your machine on *your own* prompts (quality vs. speed vs. memory)
 - [ ] Server API keys, and turning off model downloads for HTTP requests
 - [ ] AMD ROCm / Intel GPU detection in `fit` ([#26](https://github.com/matteoespo/omni-local-llm/issues/26), help wanted)
-- [ ] Docker image for the API server ([#32](https://github.com/matteoespo/omni-local-llm/issues/32))
+- [x] Docker image for the API server ([#32](https://github.com/matteoespo/omni-local-llm/issues/32)) ([docs](docs/docker.md))
 - [ ] A web version of `fit`
 
 Ideas and bug reports are very welcome: [open an issue](https://github.com/matteoespo/omni-local-llm/issues/new/choose), ask in [Discussions](https://github.com/matteoespo/omni-local-llm/discussions), or pick up a [good first issue](https://github.com/matteoespo/omni-local-llm/labels/good%20first%20issue).

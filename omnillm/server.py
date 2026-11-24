@@ -226,6 +226,11 @@ def create_app(manager: LocalLLMManager | None = None, *, allowed_hosts: Sequenc
     hosts = _allowed_hosts(allowed_hosts)
     if "*" not in hosts:
         app.add_middleware(HostCheckMiddleware, allowed_hosts=hosts)
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     llm_manager = manager if manager is not None else LocalLLMManager.from_config()
 
     @app.get("/v1/models", response_model=None)

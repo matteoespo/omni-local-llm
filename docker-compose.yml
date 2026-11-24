@@ -1,0 +1,26 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  omnillm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omnillm
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    ports:
+      - "127.0.0.1:8000:8000"
+    # To mount an omnillm.toml config file from host:
+    # volumes:
+    #   - ./omnillm.toml:/config/omnillm.toml:ro
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

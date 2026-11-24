@@ -8,6 +8,8 @@ omnillm serve
 # Server runs on http://localhost:8000
 ```
 
+For containerized deployment with Docker or Docker Compose, see the [Docker deployment guide](docker.md).
+
 ## Use with the OpenAI SDK
 
 ```python
@@ -69,6 +71,8 @@ print(embedding_res.data[0].embedding)
 - `seed`, `max_completion_tokens`, and `stream_options: {"include_usage": true}` are supported.
 - **Errors** follow the OpenAI shape (`{"error": {"message", "type", "code"}}`) with a fixed, server-written message and a request id (also in the `x-request-id` header). Exception details, which can include upstream backend output, are logged server-side under that id and never sent to clients.
 - **Host check (DNS-rebinding protection)**: only requests whose `Host` header is a loopback name are accepted by default, so a malicious web page can't reach your local server through DNS rebinding. When serving other machines, list the names clients use: `omnillm serve --host 0.0.0.0 --allowed-host gpu-box --allowed-host 192.168.1.20` (or set `OMNILLM_ALLOWED_HOSTS`; `'*'` disables the check, e.g. behind a reverse proxy).
+- **Health check**: `GET /health` returns `{"status": "ok"}` without querying model backends, making it suitable for container orchestration and uptime monitors.
+- **Docker**: For running inside a container, see [Docker deployment](docker.md).
 - There is no authentication yet: don't expose the server to untrusted networks.
 
 ## Use with curl
