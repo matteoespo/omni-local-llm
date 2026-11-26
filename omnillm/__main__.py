@@ -276,7 +276,7 @@ def _serve_api_key(args: argparse.Namespace) -> str | None:
     if args.host not in LOOPBACK_HOSTS:
         print(
             f"⚠️  No API key set while listening on {args.host}: anyone who can reach this port can use your models. "
-            f"Set {API_KEY_ENV} or pass --api-key-file.",
+            "Set OMNILLM_API_KEY or pass --api-key-file.",
             file=sys.stderr,
         )
     return None
