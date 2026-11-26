@@ -199,7 +199,11 @@ def _handle_eval(args: argparse.Namespace, manager: LocalLLMManager) -> None:
 
     eval_harness = EvalHarness(manager)
     if args.suite:
-        test_cases = eval_harness.load_jsonl_suite(args.suite)
+        try:
+            test_cases = eval_harness.load_jsonl_suite(args.suite)
+        except (OSError, ValueError, ImportError) as error:
+            print(f"❌ Cannot load suite: {error}", file=sys.stderr)
+            sys.exit(2)
     else:
         # Default built-in reasoning & instruction following test suite
         test_cases = [

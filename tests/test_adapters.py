@@ -605,3 +605,63 @@ def test_ollama_local_files_only_never_pulls_missing_models():
 
     adapter.chat(ChatRequest(model="huge:405b", messages=[]))  # downloads stay on by default for the SDK
     assert pulled == ["huge:405b"]
+
+
+@pytest.mark.parametrize(
+    ("n_ctx", "n_gpu_layers", "expected"),
+    [
+        (None, None, {}),  # unset: Ollama decides
+        (8192, 17, {"num_ctx": 8192, "num_gpu": 17}),  # fit's split plan
+        (None, 0, {"num_gpu": 0}),  # CPU only
+        (None, -1, {"num_gpu": 999}),  # llama.cpp's "all layers", not Ollama's "auto"
+    ],
+)
+def test_ollama_maps_runtime_options_to_num_ctx_and_num_gpu(n_ctx, n_gpu_layers, expected):
+    from omnillm.core.types import RuntimeOptions
+
+    client = FakeOllamaClient()
+    runtime = RuntimeOptions(n_gpu_layers=n_gpu_layers, n_ctx=n_ctx)
+
+    OllamaAdapter(client=client).chat(ChatRequest(model="m", messages=[], temperature=0.1, runtime=runtime))
+
+    assert client.chat_kwargs is not None
+    assert client.chat_kwargs["options"] == {"temperature": 0.1, **expected}
+
+
+async def test_ollama_embeddings_forward_runtime_options_only_when_set():
+    from omnillm.core.types import RuntimeOptions
+
+    class Client(FakeOllamaClient):
+        def embed(self, **kwargs: Any) -> dict[str, Any]:
+            self.embed_kwargs = kwargs
+            return {"embeddings": [[0.1]]}
+
+    class AsyncClient(FakeAsyncOllamaClient):
+        async def embed(self, **kwargs: Any) -> dict[str, Any]:
+            self.embed_kwargs = kwargs
+            return {"embeddings": [[0.1]]}
+
+    client, async_client = Client(), AsyncClient()
+    adapter = OllamaAdapter(client=client, async_client_factory=lambda: async_client)
+
+    adapter.embed(EmbeddingRequest(model="e", input=("x",)))
+    assert "options" not in client.embed_kwargs  # older clients without an options parameter keep working
+
+    adapter.embed(EmbeddingRequest(model="e", input=("x",), runtime=RuntimeOptions(n_ctx=2048)))
+    assert client.embed_kwargs["options"] == {"num_ctx": 2048}
+
+    await adapter.aembed(EmbeddingRequest(model="e", input=("x",), runtime=RuntimeOptions(n_gpu_layers=4)))
+    assert async_client.embed_kwargs is not None and async_client.embed_kwargs["options"] == {"num_gpu": 4}
+
+
+def test_ollama_alias_runtime_options_reach_the_server():
+    from omnillm import LocalLLMManager
+
+    client = FakeOllamaClient()
+    manager = LocalLLMManager({"ollama": OllamaAdapter(client=client)})
+    manager.register_alias("qwen", backend="ollama", model="qwen2.5:7b", n_ctx=8192, n_gpu_layers=16)
+
+    manager.chat(model="qwen", messages=[{"role": "user", "content": "hi"}])
+
+    assert client.chat_kwargs is not None
+    assert client.chat_kwargs["options"] == {"num_ctx": 8192, "num_gpu": 16}
