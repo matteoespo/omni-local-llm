@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ from omnillm.core.errors import (
     BackendUnavailableError,
     InvalidImageError,
     InvalidRequestError,
+    ModelNotDownloadedError,
     ModelNotFoundError,
     UnsupportedFeatureError,
 )
@@ -90,6 +92,12 @@ logger = logging.getLogger("omnillm.server")
 #: Hosts accepted by default: loopback names only, which blocks DNS-rebinding attacks from web pages.
 LOOPBACK_HOSTS: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
 ALLOWED_HOSTS_ENV = "OMNILLM_ALLOWED_HOSTS"
+#: Bearer token clients must send when set (``Authorization: Bearer <key>``).
+API_KEY_ENV = "OMNILLM_API_KEY"
+#: Set to 1/true to let API requests download models (Ollama pulls, Hugging Face GGUF files).
+ALLOW_DOWNLOADS_ENV = "OMNILLM_ALLOW_DOWNLOADS"
+#: Paths served without an API key, so container health checks and uptime monitors keep working.
+PUBLIC_PATHS: frozenset[str] = frozenset({"/health"})
 
 _FEATURE_MESSAGES: dict[str, str] = {
     "streaming": "The backend for this model does not support streaming.",
@@ -130,6 +138,12 @@ def _error_response(error: Exception) -> JSONResponse:
     message = "An internal error has occurred."
     if isinstance(error, InvalidImageError):
         status_code, error_type, code, message = 400, "invalid_request_error", "invalid_image", _IMAGE_MESSAGE
+    elif isinstance(error, ModelNotDownloadedError):
+        status_code, error_type, code = 404, "invalid_request_error", "model_not_downloaded"
+        message = (
+            "The requested model is not downloaded on this server, and this server does not download models "
+            "for API requests. Download it on the server first, or start the server with --allow-downloads."
+        )
     elif isinstance(error, ModelNotFoundError):
         status_code, error_type, code = 404, "invalid_request_error", "model_not_found"
         message = "The requested model was not found on its backend. GET /v1/models lists available models."
@@ -202,6 +216,46 @@ class HostCheckMiddleware:
         await self.app(scope, receive, send)
 
 
+class ApiKeyMiddleware:
+    """Requires ``Authorization: Bearer <key>`` on every request except `PUBLIC_PATHS`."""
+
+    def __init__(self, app: ASGIApp, api_key: str):
+        self.app = app
+        self.expected = api_key.encode()
+
+    def _is_authorized(self, scope: Scope) -> bool:
+        scheme, _, token = Headers(scope=scope).get("authorization", "").strip().partition(" ")
+        # Constant-time comparison, so response timing doesn't reveal how much of a guessed key was right.
+        return scheme.lower() == "bearer" and hmac.compare_digest(token.strip().encode(), self.expected)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["path"] not in PUBLIC_PATHS and not self._is_authorized(scope):
+            response = _client_error(
+                "Missing or invalid API key. Send it as 'Authorization: Bearer <key>'.",
+                status_code=401,
+                code="invalid_api_key",
+            )
+            response.headers["WWW-Authenticate"] = "Bearer"
+            await response(scope, receive, send)
+            return
+        if scope["type"] == "websocket" and not self._is_authorized(scope):
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        await self.app(scope, receive, send)
+
+
+def _api_key(api_key: str | None) -> str | None:
+    if api_key is None:
+        api_key = os.environ.get(API_KEY_ENV, "")
+    return api_key.strip() or None
+
+
+def _allow_downloads(allow_downloads: bool | None) -> bool:
+    if allow_downloads is not None:
+        return allow_downloads
+    return os.environ.get(ALLOW_DOWNLOADS_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _allowed_hosts(allowed_hosts: Sequence[str] | None) -> list[str]:
     if allowed_hosts is not None:
         return list(allowed_hosts)
@@ -215,17 +269,35 @@ def _sse(data: dict[str, Any]) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-def create_app(manager: LocalLLMManager | None = None, *, allowed_hosts: Sequence[str] | None = None) -> FastAPI:
+def create_app(
+    manager: LocalLLMManager | None = None,
+    *,
+    allowed_hosts: Sequence[str] | None = None,
+    api_key: str | None = None,
+    allow_downloads: bool | None = None,
+) -> FastAPI:
     """Builds the OpenAI-compatible API.
 
     `allowed_hosts` limits accepted ``Host`` headers (default: ``$OMNILLM_ALLOWED_HOSTS`` or loopback names),
     which stops malicious web pages from reaching a local server through DNS rebinding. Pass ``["*"]`` to
     accept any host, e.g. behind a reverse proxy that already checks it.
+
+    `api_key` (default: ``$OMNILLM_API_KEY``) makes every endpoint except ``/health`` require
+    ``Authorization: Bearer <key>``. An empty string disables the check.
+
+    `allow_downloads` (default: ``$OMNILLM_ALLOW_DOWNLOADS``, else off) lets requests download models that
+    aren't available locally. When off, API clients can only use models already installed on the server, so
+    they can't fill its disk or make it fetch and load arbitrary model files.
     """
     app = FastAPI(title="Omni-Local-LLM OpenAI API", version=__version__)
+    key = _api_key(api_key)
+    if key is not None:
+        app.add_middleware(ApiKeyMiddleware, api_key=key)
     hosts = _allowed_hosts(allowed_hosts)
     if "*" not in hosts:
-        app.add_middleware(HostCheckMiddleware, allowed_hosts=hosts)
+        app.add_middleware(HostCheckMiddleware, allowed_hosts=hosts)  # added last, so it runs first
+    # None keeps alias/config defaults; True overrides them so API requests never trigger a download.
+    local_files_only: bool | None = None if _allow_downloads(allow_downloads) else True
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -287,6 +359,7 @@ def create_app(manager: LocalLLMManager | None = None, *, allowed_hosts: Sequenc
                 seed=request.seed,
                 filename=request.filename,
                 mmproj_filename=request.mmproj_filename,
+                local_files_only=local_files_only,
             )
         except Exception as error:
             return _error_response(error)
@@ -414,6 +487,7 @@ def create_app(manager: LocalLLMManager | None = None, *, allowed_hosts: Sequenc
             response = await llm_manager.aembed(
                 model=request.model,
                 input=inputs,
+                local_files_only=local_files_only,
             )
         except Exception as error:
             return _error_response(error)

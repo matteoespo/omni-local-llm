@@ -9,7 +9,7 @@ import pytest
 
 from omnillm.adapters.llamacpp_adapter import LlamaCPPAdapter
 from omnillm.adapters.ollama_adapter import OllamaAdapter
-from omnillm.core.errors import BackendUnavailableError, InvalidRequestError
+from omnillm.core.errors import BackendUnavailableError, InvalidRequestError, ModelNotDownloadedError
 from omnillm.core.types import ChatRequest, EmbeddingRequest, ModelSource
 
 
@@ -578,6 +578,30 @@ def test_llamacpp_uses_local_cache_before_the_network():
     assert calls == [True, False]  # cache miss: download
 
     calls.clear()
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ModelNotDownloadedError) as excinfo:
         adapter.pull_model("o/m", ModelSource(filename="m.gguf", local_files_only=True))
     assert calls == [True]  # offline mode never touches the network
+    assert isinstance(excinfo.value.__cause__, FileNotFoundError)
+
+
+def test_ollama_local_files_only_never_pulls_missing_models():
+    client = FakeOllamaClient()
+    pulled: list[str] = []
+
+    def show(model: str) -> None:
+        raise FakeOllamaClient.ResponseError(404)
+
+    client.show = show  # type: ignore[method-assign]
+    client.pull = pulled.append  # type: ignore[attr-defined]
+    adapter = OllamaAdapter(client=client)
+
+    with pytest.raises(ModelNotDownloadedError):
+        adapter.chat(ChatRequest(model="huge:405b", messages=[], model_source=ModelSource(local_files_only=True)))
+    with pytest.raises(ModelNotDownloadedError):
+        adapter.embed(
+            EmbeddingRequest(model="huge:405b", input=("x",), model_source=ModelSource(local_files_only=True))
+        )
+    assert pulled == []
+
+    adapter.chat(ChatRequest(model="huge:405b", messages=[]))  # downloads stay on by default for the SDK
+    assert pulled == ["huge:405b"]

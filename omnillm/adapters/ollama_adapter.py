@@ -6,7 +6,13 @@ from contextlib import contextmanager
 from typing import Any
 
 from omnillm.core.base import LLMBackend
-from omnillm.core.errors import BackendUnavailableError, InvalidRequestError, ModelNotFoundError, OmniLLMError
+from omnillm.core.errors import (
+    BackendUnavailableError,
+    InvalidRequestError,
+    ModelNotDownloadedError,
+    ModelNotFoundError,
+    OmniLLMError,
+)
 from omnillm.core.media import normalize_messages_for_ollama
 from omnillm.core.tool_calls import to_openai_tool_call
 from omnillm.core.types import (
@@ -124,7 +130,7 @@ class OllamaAdapter(LLMBackend):
         return client
 
     def pull_model(self, model_name: str, source: ModelSource) -> None:
-        del source
+        """Pulls the model if the Ollama server doesn't have it, unless `source.local_files_only` is set."""
         if model_name in self._known_models:
             return
 
@@ -135,6 +141,10 @@ class OllamaAdapter(LLMBackend):
             response_error = self._response_error_type()
             if response_error is None or not isinstance(error, response_error) or _value(error, "status_code") != 404:
                 raise
+            if source.local_files_only:
+                raise ModelNotDownloadedError(
+                    f"Ollama model '{model_name}' is not installed and downloads are disabled."
+                ) from error
             client.pull(model_name)
         self._known_models.add(model_name)
 

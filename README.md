@@ -68,7 +68,7 @@ n_ctx = 8192
 fallbacks = ["lmstudio/qwen2.5-coder-7b-instruct", "ollama/llama3.2:3b"]
 ```
 
-`omnillm serve` then gives every tool you use one OpenAI-compatible endpoint, where `"model": "coder"` just works.
+`omnillm serve` then gives every tool you use one OpenAI-compatible endpoint, where `"model": "coder"` just works. Set `OMNILLM_API_KEY` to require a key, and API clients can only use models that are already downloaded.
 
 → [Backends & config](docs/backends.md) · [API server](docs/server.md)
 

@@ -241,9 +241,45 @@ def _handle_serve(args: argparse.Namespace, manager: LocalLLMManager) -> None:
         print("The API server requires optional dependencies: install omni-local-llm[server]", file=sys.stderr)
         sys.exit(1)
 
-    app = create_app(manager=manager, allowed_hosts=_serve_allowed_hosts(args))
+    api_key = _serve_api_key(args)
+    allow_downloads = True if getattr(args, "allow_downloads", False) else None  # None: $OMNILLM_ALLOW_DOWNLOADS
+    app = create_app(
+        manager=manager,
+        allowed_hosts=_serve_allowed_hosts(args),
+        api_key=api_key,
+        allow_downloads=allow_downloads,
+    )
     print(f"Starting Omni-Local-LLM OpenAI-Compatible API on http://{args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+def _serve_api_key(args: argparse.Namespace) -> str | None:
+    """The key clients must send: --api-key-file, else $OMNILLM_API_KEY (None: no key). Warns when exposed without one."""
+    import os
+
+    from omnillm.server import API_KEY_ENV, LOOPBACK_HOSTS
+
+    key_file = getattr(args, "api_key_file", None)
+    if key_file:
+        try:
+            key = Path(key_file).read_text(encoding="utf-8").strip()
+        except OSError as error:
+            print(f"❌ Cannot read --api-key-file: {error}", file=sys.stderr)
+            sys.exit(2)
+        if not key:
+            print(f"❌ --api-key-file {key_file} is empty.", file=sys.stderr)
+            sys.exit(2)
+        return key
+    key = os.environ.get(API_KEY_ENV, "").strip()
+    if key:
+        return key
+    if args.host not in LOOPBACK_HOSTS:
+        print(
+            f"⚠️  No API key set while listening on {args.host}: anyone who can reach this port can use your models. "
+            "Set OMNILLM_API_KEY or pass --api-key-file.",
+            file=sys.stderr,
+        )
+    return None
 
 
 def _serve_allowed_hosts(args: argparse.Namespace) -> list[str] | None:
@@ -484,6 +520,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="HOST",
         help="Accept requests with this Host header (repeatable; '*.domain' wildcards, '*' for any). "
         "Defaults to loopback names plus the bind address, to block DNS-rebinding attacks.",
+    )
+    serve_p.add_argument(
+        "--api-key-file",
+        metavar="PATH",
+        help="Require clients to send the key in this file as 'Authorization: Bearer <key>' "
+        "(default: $OMNILLM_API_KEY; no key if unset). /health stays public.",
+    )
+    serve_p.add_argument(
+        "--allow-downloads",
+        action="store_true",
+        help="Let API requests download models that aren't installed (Ollama pulls, Hugging Face GGUFs). "
+        "Off by default; also enabled by OMNILLM_ALLOW_DOWNLOADS=1.",
     )
 
     # 7. Fit (Hardware & Quantization Recommender)

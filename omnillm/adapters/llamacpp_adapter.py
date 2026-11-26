@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from typing import Any
 
 from omnillm.core.base import LLMBackend
-from omnillm.core.errors import BackendUnavailableError, InvalidRequestError
+from omnillm.core.errors import BackendUnavailableError, InvalidRequestError, ModelNotDownloadedError
 from omnillm.core.media import normalize_messages_for_openai
 from omnillm.core.tool_calls import to_openai_tool_call
 from omnillm.core.types import (
@@ -204,9 +204,11 @@ class LlamaCPPAdapter(LLMBackend):
         }
         try:
             return hub_download(**kwargs, local_files_only=True)
-        except Exception:
+        except Exception as error:
             if source.local_files_only:
-                raise
+                raise ModelNotDownloadedError(
+                    f"'{filename}' from '{model_name}' is not in the local Hugging Face cache and downloads are disabled."
+                ) from error
         return hub_download(**kwargs, local_files_only=False)
 
     def pull_model(self, model_name: str, source: ModelSource) -> str:

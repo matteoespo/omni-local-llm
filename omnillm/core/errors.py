@@ -33,6 +33,10 @@ class ModelNotFoundError(InvalidRequestError):
     """Raised when a backend reports that the requested model does not exist."""
 
 
+class ModelNotDownloadedError(ModelNotFoundError):
+    """Raised when a model isn't available locally and downloads are disabled (`local_files_only`)."""
+
+
 class InvalidImageError(InvalidRequestError):
     """Raised when an image from an untrusted source is not inline base64 data."""
 

@@ -15,6 +15,10 @@ services:
       - ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
+      # Require a bearer token on every endpoint except /health (recommended before exposing the port):
+      # - OMNILLM_API_KEY=${OMNILLM_API_KEY}
+      # Let API requests pull models that aren't installed yet (off by default):
+      # - OMNILLM_ALLOW_DOWNLOADS=1
     ports:
       - "127.0.0.1:8000:8000"
     # To mount an omnillm.toml config file from host:

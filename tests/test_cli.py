@@ -305,3 +305,48 @@ def test_display_path_shortens_cwd_and_home(tmp_path, monkeypatch):
     assert _display_path(tmp_path / "omnillm.toml") == "./omnillm.toml"
     assert _display_path(Path.home() / ".cache" / "x.gguf") == "~/.cache/x.gguf"
     assert _display_path(Path("/definitely/elsewhere.gguf")) == "/definitely/elsewhere.gguf"
+
+
+def test_serve_api_key_from_file_env_or_none(tmp_path, monkeypatch, capsys):
+    from omnillm.__main__ import _serve_api_key
+
+    monkeypatch.delenv("OMNILLM_API_KEY", raising=False)
+    parse = build_parser().parse_args
+    key_file = tmp_path / "key"
+    key_file.write_text("file-key\n")
+
+    assert _serve_api_key(parse(["serve", "--api-key-file", str(key_file)])) == "file-key"
+    assert _serve_api_key(parse(["serve"])) is None
+    assert capsys.readouterr().err == ""  # loopback without a key: no warning
+
+    assert _serve_api_key(parse(["serve", "--host", "0.0.0.0"])) is None
+    assert "No API key set" in capsys.readouterr().err
+
+    monkeypatch.setenv("OMNILLM_API_KEY", "env-key")
+    assert _serve_api_key(parse(["serve", "--host", "0.0.0.0"])) == "env-key"
+    assert _serve_api_key(parse(["serve", "--api-key-file", str(key_file)])) == "file-key"  # file wins
+
+    key_file.write_text("  \n")
+    with pytest.raises(SystemExit):
+        _serve_api_key(parse(["serve", "--api-key-file", str(key_file)]))
+    with pytest.raises(SystemExit):
+        _serve_api_key(parse(["serve", "--api-key-file", str(tmp_path / "missing")]))
+
+
+def test_serve_passes_hardening_options_to_the_app(monkeypatch):
+    import uvicorn
+
+    import omnillm.server as server
+    from omnillm.__main__ import _handle_serve
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(server, "create_app", lambda **kwargs: captured.update(kwargs) or "app")
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kwargs: None)
+    monkeypatch.setenv("OMNILLM_API_KEY", "k")
+    parse = build_parser().parse_args
+
+    _handle_serve(parse(["serve"]), LocalLLMManager({}))
+    assert (captured["api_key"], captured["allow_downloads"]) == ("k", None)  # None: the env var decides
+
+    _handle_serve(parse(["serve", "--allow-downloads"]), LocalLLMManager({}))
+    assert captured["allow_downloads"] is True
