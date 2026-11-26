@@ -100,15 +100,16 @@ Also streaming (sync and async), chat sessions with context-window pruning, visi
 
 → [SDK docs](docs/sdk.md)
 
-### 4. Benchmarks and evals on your machine
+### 4. Benchmarks, evals and `pick` on your machine
 
 ```bash
+omnillm pick --suite my_tasks.jsonl                  # which installed model is best for *your* tasks?
 omnillm bench --targets coder,ollama/llama3.2:3b     # time to first token, tokens/sec
 omnillm eval --model coder --suite my_tests.jsonl    # regex, JSON Schema, JSON value and tool-call checks
 omnillm eval --model coder --needle                  # needle-in-a-haystack retrieval
 ```
 
-→ [Harness docs](docs/harness.md)
+`pick` runs your suite and a short benchmark on every installed model that `fit` says will run, at the placement `fit` computed, and recommends one. Small suites are noisy, so pass counts within about one standard error count as ties. → [Pick docs](docs/pick.md) · [Harness docs](docs/harness.md)
 
 ## How is this different from…?
 
@@ -140,7 +141,8 @@ The core package depends only on `httpx`, and `fit` works without any extras. Re
 | [Hardware fit](docs/fit.md) | Sources, KV cache, placement, `--pull`, `--save-alias`, SDK |
 | [Backends & config](docs/backends.md) | OpenAI-compatible servers, `omnillm.toml`, aliases, fallbacks |
 | [Python SDK](docs/sdk.md) | Chat, sessions, streaming, tools, structured outputs, embeddings, vision |
-| [CLI](docs/cli.md) | `chat`, `run`, `models`, `bench`, `eval`, `serve`, `fit` |
+| [Pick](docs/pick.md) | `omnillm pick`: rank installed models on your own tasks, `--prefer`, tie margin, `--save-alias` |
+| [CLI](docs/cli.md) | `chat`, `run`, `models`, `bench`, `eval`, `serve`, `fit`, `pick` |
 | [API server](docs/server.md) | OpenAI SDK and curl usage, errors, host check |
 | [Docker deployment](docs/docker.md) | Dockerfile, docker-compose, config mounting, host Ollama, security |
 | [Benchmarks & evals](docs/harness.md) | `BenchmarkHarness`, `EvalHarness`, `NeedleHarness` |
@@ -150,8 +152,9 @@ The core package depends only on `httpx`, and `fit` works without any extras. Re
 
 The live roadmap is in the pinned [Roadmap & feedback](https://github.com/matteoespo/omni-local-llm/issues/31) issue.
 
-- [ ] `omnillm pick`: rank the models that fit your machine on *your own* prompts (quality vs. speed vs. memory)
-- [ ] Server API keys, and turning off model downloads for HTTP requests
+- [x] `omnillm pick`: rank the models that fit your machine on *your own* prompts (quality vs. speed vs. memory) ([docs](docs/pick.md))
+- [ ] `omnillm pick --suggest`: suggest and download new models that fit, within a disk budget
+- [x] Server API keys, and turning off model downloads for HTTP requests ([docs](docs/server.md#access-control))
 - [ ] AMD ROCm / Intel GPU detection in `fit` ([#26](https://github.com/matteoespo/omni-local-llm/issues/26), help wanted)
 - [x] Docker image for the API server ([#32](https://github.com/matteoespo/omni-local-llm/issues/32)) ([docs](docs/docker.md))
 - [ ] A web version of `fit`

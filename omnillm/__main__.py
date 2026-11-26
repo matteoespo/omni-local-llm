@@ -425,6 +425,108 @@ def _handle_fit(args: argparse.Namespace, manager: LocalLLMManager | None = None
     print("  " + alias_snippet(rec, result).replace("\n", "\n  ") + "\n")
 
 
+def _share(text: str) -> float:
+    """argparse type for a fraction between 0 and 1 (also accepts a percentage like 50%)."""
+    try:
+        value = float(text[:-1]) / 100 if text.endswith("%") else float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected a number between 0 and 1, got {text!r}") from None
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError(f"expected a number between 0 and 1, got {text!r}")
+    return value
+
+
+def _handle_pick(args: argparse.Namespace, manager: LocalLLMManager) -> None:
+    from omnillm.core.errors import OmniLLMError
+    from omnillm.harness.pick import PickHarness, discover_candidates, format_plan, pick_alias_table, save_pick_alias
+
+    try:
+        test_cases = EvalHarness.load_jsonl_suite(args.suite)
+    except (OSError, ValueError, ImportError) as error:
+        print(f"❌ Cannot load suite: {error}", file=sys.stderr)
+        sys.exit(2)
+    if not test_cases:
+        print(f"❌ Suite {args.suite} has no test cases.", file=sys.stderr)
+        sys.exit(2)
+
+    refs = [ref.strip() for ref in args.models.split(",") if ref.strip()] if args.models else []
+    if not refs:
+        refs = discover_candidates(manager)
+    if not refs:
+        print(
+            "❌ No candidates: no aliases in your config and no installed Ollama models "
+            "(is `ollama serve` running?). Pass --models to list them.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    harness = PickHarness(manager)
+    candidates = harness.plan(
+        refs, context_length=args.context, kv_cache_type=args.kv_cache, max_candidates=args.max_candidates
+    )
+    runnable = [c for c in candidates if c.status == "pending"]
+    hardware = harness.hardware
+    assert hardware is not None  # set by plan()
+    if args.dry_run or not runnable:
+        if args.json:
+            print(
+                json.dumps({"context_length": args.context, "candidates": [c.to_dict() for c in candidates]}, indent=2)
+            )
+        else:
+            print("\n" + format_plan(candidates, hardware, args.context) + "\n")
+            if runnable:
+                print(
+                    f"Would measure {len(runnable)} candidate(s) on {len(test_cases)} case(s). Nothing is downloaded."
+                )
+        if not runnable:
+            print("❌ Nothing to measure: no candidate fits this machine.", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    print(
+        f"Measuring {len(runnable)} candidate(s): {len(test_cases)} case(s) and {args.bench_runs} benchmark run(s) "
+        "each. Nothing is downloaded.",
+        file=sys.stderr,
+    )
+    report = harness.run(
+        candidates,
+        test_cases,
+        context_length=args.context,
+        prefer=args.prefer,
+        min_pass=args.min_pass,
+        bench_tokens=args.bench_tokens,
+        bench_runs=args.bench_runs,
+        suite_name=Path(args.suite).name,
+        progress=lambda message: print(message, file=sys.stderr),
+    )
+    winner = report.recommended
+
+    saved: Path | None = None
+    if args.save_alias and winner is not None:
+        try:
+            saved = save_pick_alias(winner, args.context, args.save_alias, _alias_config_path(args))
+        except (OmniLLMError, ValueError, TypeError) as error:
+            print(f"❌ {error}", file=sys.stderr)
+            sys.exit(1)
+
+    if args.json:
+        payload = report.to_dict()
+        payload["saved_alias"] = {"name": args.save_alias, "path": str(saved)} if saved else None
+        print(json.dumps(payload, indent=2))
+    else:
+        print("\n" + report.format_table() + "\n")
+        if saved is not None:
+            print(f"✅ Saved alias '{args.save_alias}' to {_display_path(saved)}. Run it with:")
+            print(f'   omnillm run --model {args.save_alias} "Hello!"')
+        elif winner is not None:
+            table = pick_alias_table(winner, args.context, "picked")
+            print("Add it to omnillm.toml (or pass --save-alias NAME next time):\n")
+            print("  " + table.replace("\n", "\n  ") + "\n")
+    if args.save_alias and winner is None:
+        print("❌ Nothing saved: there is no recommendation.", file=sys.stderr)
+        sys.exit(1)
+
+
 def _display_path(path: Path) -> str:
     """Shortens paths for display: ./relative under the working directory, ~/... under the home directory."""
     resolved = Path(path).expanduser().resolve()
@@ -571,6 +673,41 @@ def build_parser() -> argparse.ArgumentParser:
     fit_p.add_argument("--params", type=float, help="Explicit parameter count in billions (overrides auto-detection)")
     fit_p.add_argument("--json", action="store_true", help="Output raw JSON analysis")
 
+    # 8. Pick (fit + eval + bench on the models you have)
+    pick_p = subparsers.add_parser(
+        "pick",
+        help="Find which installed model is best for your own tasks (fit + eval + benchmark)",
+        parents=[common],
+    )
+    pick_p.add_argument("--suite", required=True, help="JSONL suite of your tasks (format: docs/harness.md)")
+    pick_p.add_argument(
+        "--models",
+        help="Comma-separated candidates: aliases or 'backend/model' refs "
+        "(default: your aliases and every installed Ollama model)",
+    )
+    pick_p.add_argument(
+        "--prefer",
+        choices=["quality", "balanced", "speed"],
+        default="balanced",
+        help="quality: most passes. balanced (default): fastest model tied with the best on quality. "
+        "speed: fastest model above --min-pass",
+    )
+    pick_p.add_argument("--context", type=int, default=4096, help="Context window every candidate runs with")
+    pick_p.add_argument("--kv-cache", default="f16", choices=["f16", "q8_0", "q4_0"], help="KV cache type for fit")
+    pick_p.add_argument(
+        "--min-pass",
+        type=_share,
+        default=0.5,
+        metavar="SHARE",
+        help="Never recommend a model passing less than this share of the suite (default: 0.5)",
+    )
+    pick_p.add_argument("--max-candidates", type=int, metavar="N", help="Measure at most N candidates (in order)")
+    pick_p.add_argument("--bench-tokens", type=int, default=128, help="Tokens per benchmark run (default: 128)")
+    pick_p.add_argument("--bench-runs", type=int, default=3, help="Benchmark runs per model (default: 3)")
+    pick_p.add_argument("--dry-run", action="store_true", help="Show the candidates and fit results; measure nothing")
+    pick_p.add_argument("--save-alias", metavar="NAME", help="Save the recommended model as an alias in omnillm.toml")
+    pick_p.add_argument("--json", action="store_true", help="Output the full report as JSON")
+
     # Top-level fallback arguments for backwards compatibility (e.g. `python -m omnillm --model llama3`)
     parser.add_argument("--backend", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--model", help=argparse.SUPPRESS)
@@ -623,6 +760,8 @@ def main() -> None:
         _handle_serve(args, manager)
     elif args.subcommand == "fit":
         _handle_fit(args, manager)
+    elif args.subcommand == "pick":
+        _handle_pick(args, manager)
     else:
         # Fallback to chat if --model was provided at top-level
         if getattr(args, "model", None):

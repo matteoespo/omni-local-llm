@@ -37,7 +37,7 @@ from .core.types import (
     ModelTarget,
     Usage,
 )
-from .harness import BenchmarkHarness, EvalHarness, NeedleHarness
+from .harness import BenchmarkHarness, EvalHarness, NeedleHarness, PickHarness
 
 try:
     __version__ = _package_version("omni-local-llm")
@@ -67,6 +67,7 @@ __all__ = [
     "NeedleHarness",
     "OmniLLMError",
     "OpenAICompatibleAdapter",
+    "PickHarness",
     "QuantFitResult",
     "QuantFitStatus",
     "ToolLoopLimitError",

@@ -16,6 +16,11 @@ from omnillm.harness.needle import (
     NeedleResult,
     NeedleTrial,
 )
+from omnillm.harness.pick import (
+    PickCandidate,
+    PickHarness,
+    PickReport,
+)
 
 __all__ = [
     "BenchmarkHarness",
@@ -30,4 +35,7 @@ __all__ = [
     "NeedleHarness",
     "NeedleResult",
     "NeedleTrial",
+    "PickCandidate",
+    "PickHarness",
+    "PickReport",
 ]
