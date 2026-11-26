@@ -350,3 +350,17 @@ def test_serve_passes_hardening_options_to_the_app(monkeypatch):
 
     _handle_serve(parse(["serve", "--allow-downloads"]), LocalLLMManager({}))
     assert captured["allow_downloads"] is True
+
+
+def test_cli_eval_reports_a_bad_suite_without_a_traceback(tmp_path, capsys):
+    from omnillm.__main__ import _handle_eval
+
+    suite = tmp_path / "suite.jsonl"
+    suite.write_text('{"name": "no prompt"}\n')
+    args = build_parser().parse_args(["eval", "--model", "m", "--suite", str(suite)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _handle_eval(args, LocalLLMManager({}))
+
+    assert excinfo.value.code == 2
+    assert f"Cannot load suite: {suite}:1:" in capsys.readouterr().err

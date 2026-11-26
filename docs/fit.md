@@ -56,6 +56,8 @@ n_ctx = 2048
 n_gpu_layers = -1
 ```
 
+For an installed Ollama model, apply the plan with an alias: `n_ctx` and `n_gpu_layers` are passed to Ollama as `num_ctx` and `num_gpu` (see [Backends & config](backends.md#omnillmtoml-named-backends-and-model-aliases)).
+
 Run `omnillm fit` without arguments for a compatibility matrix of popular models on your machine. Set `HF_TOKEN` for gated repos and `HF_ENDPOINT` for a mirror.
 
 ## Accuracy

@@ -198,3 +198,140 @@ def test_benchmark_prefers_backend_reported_token_counts():
     exact_run, estimated_run = suite.results[0].runs[0], suite.results[1].runs[0]
     assert (exact_run.prompt_tokens, exact_run.completion_tokens, exact_run.token_counts_exact) == (11, 40, True)
     assert (estimated_run.completion_tokens, estimated_run.token_counts_exact) == (2, False)
+
+
+class ScriptedBackend(RecordingBackend):
+    """Answers each prompt with a fixed reply, so one suite can mix passing and failing cases."""
+
+    def __init__(self, replies: dict[str, str]):
+        super().__init__()
+        self.replies = replies
+
+    def chat(self, request):
+        self.requests.append(request)
+        return ChatResponse(content=self.replies[request.messages[-1]["content"]])
+
+    async def achat(self, request):
+        return self.chat(request)
+
+
+PERSON_SCHEMA = {
+    "type": "object",
+    "properties": {"name": {"type": "string"}, "age": {"type": "integer", "minimum": 0}},
+    "required": ["name", "age"],
+}
+
+
+async def test_expected_json_schema_is_enforced_and_validated():
+    backend = ScriptedBackend(
+        {
+            "ok": '{"name": "Bob", "age": 34}',
+            "fenced": '```json\n{"name": "Bob", "age": 34}\n```',
+            "negative": '{"name": "Bob", "age": -1}',
+            "missing": '{"name": "Bob"}',
+            "prose": "Bob is 34.",
+        }
+    )
+    harness = EvalHarness(LocalLLMManager({"fake": backend}))
+    cases = [EvalTestCase(name=p, prompt=p, expected_json_schema=PERSON_SCHEMA) for p in backend.replies]
+
+    for result in (harness.run_suite("fake", "m", cases), await harness.arun_suite("fake", "m", cases)):
+        outcome = {r.test_case.name: (r.passed, r.error or "") for r in result.results}
+        assert outcome["ok"] == (True, "") and outcome["fenced"] == (True, "")
+        assert not outcome["negative"][0] and "at $.age" in outcome["negative"][1]
+        assert not outcome["missing"][0] and "'age' is a required property" in outcome["missing"][1]
+        assert outcome["prose"] == (False, "Output is not valid JSON")
+
+    request = backend.requests[0]
+    assert request.json_mode is True and request.json_schema == PERSON_SCHEMA  # enforced at the sampler
+
+
+CITY = {"city": "Lyon", "country": "France"}
+
+
+@pytest.mark.parametrize(
+    ("expected", "reply", "error"),
+    [
+        (CITY, '{"city": "Lyon", "country": "France", "extra": 1}', None),  # extra keys are fine
+        (CITY, '{"city": "Lyon", "country": "Italy"}', '$.country: expected "France", got "Italy"'),
+        (CITY, '{"city": "Lyon"}', "$.country is missing"),
+        ({"tags": ["a"]}, '{"tags": ["a"]}', None),
+        ({"tags": ["a"]}, '{"tags": ["a", "b"]}', '$.tags: expected ["a"], got ["a", "b"]'),  # lists match exactly
+        ({"ok": True}, '{"ok": 1}', "$.ok: expected true, got 1"),  # booleans never equal numbers
+        ({"n": 2}, '{"n": 2.0}', None),
+    ],
+)
+def test_expected_json_checks_values_and_requests_json_mode(expected, reply, error):
+    backend = ScriptedBackend({"p": reply})
+
+    result = EvalHarness(LocalLLMManager({"fake": backend})).run_suite(
+        "fake", "m", [EvalTestCase(name="t", prompt="p", expected_json=expected)]
+    )
+
+    assert backend.requests[0].json_mode is True
+    assert result.results[0].passed is (error is None), result.results[0].error
+    if error is not None:
+        assert error in (result.results[0].error or "")
+
+
+def test_pydantic_and_json_schema_checks_are_exclusive():
+    class Person(BaseModel):
+        name: str
+
+    with pytest.raises(ValueError, match="not both"):
+        EvalTestCase(name="t", prompt="p", expected_schema=Person, expected_json_schema=PERSON_SCHEMA)
+
+
+def test_jsonl_suite_loads_json_checks_and_reports_bad_lines(tmp_path: Path):
+    import json
+
+    good = tmp_path / "good.jsonl"
+    good.write_text(
+        json.dumps({"name": "extract", "prompt": "Bob, 34", "expected_json_schema": PERSON_SCHEMA})
+        + "\n"
+        + json.dumps({"name": "values", "prompt": "Lyon", "expected_json": {"country": "France"}})
+        + "\n"
+    )
+    cases = EvalHarness.load_jsonl_suite(good)
+    assert cases[0].expected_json_schema == PERSON_SCHEMA
+    assert cases[1].expected_json == {"country": "France"}
+
+    for line, message in [
+        (json.dumps({"prompt": "x", "expected_json_schema": {"type": "objekt"}}), "invalid expected_json_schema"),
+        (json.dumps({"prompt": "x", "expected_json_schema": "object"}), "must be a JSON object"),
+        (json.dumps({"name": "no prompt"}), "with a 'prompt'"),
+        ("{not json", "Expecting property name"),
+    ]:
+        bad = tmp_path / "bad.jsonl"
+        bad.write_text('{"prompt": "fine"}\n\n' + line + "\n")
+        with pytest.raises(ValueError, match=message) as excinfo:
+            EvalHarness.load_jsonl_suite(bad)
+        assert f"{bad}:3:" in str(excinfo.value)  # points at the offending line
+
+
+def test_json_schema_without_the_eval_extra_gives_an_install_hint(tmp_path: Path, monkeypatch):
+    import json
+    import sys
+
+    monkeypatch.setitem(sys.modules, "jsonschema", None)
+    suite = tmp_path / "s.jsonl"
+    suite.write_text(json.dumps({"prompt": "x", "expected_json_schema": PERSON_SCHEMA}) + "\n")
+
+    with pytest.raises(ImportError, match=r"omni-local-llm\[eval\]"):
+        EvalHarness.load_jsonl_suite(suite)
+
+    backend = ScriptedBackend({"x": '{"name": "Bob", "age": 1}'})
+    result = EvalHarness(LocalLLMManager({"fake": backend})).run_suite(
+        "fake", "m", [EvalTestCase(name="t", prompt="x", expected_json_schema=PERSON_SCHEMA)]
+    )
+    assert "omni-local-llm[eval]" in (result.results[0].error or "")
+
+
+def test_per_case_options_override_the_checks_request_options():
+    backend = ScriptedBackend({"p": '{"a": 1}'})
+    case = EvalTestCase(name="t", prompt="p", expected_json={"a": 1}, options={"json_mode": False, "tools": []})
+
+    result = EvalHarness(LocalLLMManager({"fake": backend})).run_suite("fake", "m", [case])
+
+    assert result.results[0].passed, result.results[0].error  # no "multiple values for keyword argument"
+    assert backend.requests[0].json_mode is False

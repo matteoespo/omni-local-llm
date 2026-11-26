@@ -57,6 +57,27 @@ results.print_table()
 # Outputs pass rate %, individual test latency, and errors
 ```
 
+### JSONL suites
+
+`omnillm eval --model coder --suite my_tasks.jsonl` (or `EvalHarness.load_jsonl_suite(path)`) reads one test case per line. Every check that's set must pass:
+
+| Key | Check |
+|---|---|
+| `prompt` (required), `name`, `system_prompt` | The request |
+| `expected_pattern` | Regex the output must contain (case-insensitive) |
+| `expected_json_schema` | JSON Schema the output must satisfy. It's sent to the backend as a structured-output format (enforced at the sampler where supported), then validated. Needs `pip install "omni-local-llm[eval]"` |
+| `expected_json` | Values the output's JSON must contain. Objects may have extra keys; lists and scalars must match exactly (`true` never equals `1`). Turns on JSON mode unless a schema is set |
+| `expected_tool_call` + `tools` | Name of a tool the model must call, and the OpenAI-format tool definitions to offer |
+| `options` | Per-case request options, e.g. `{"temperature": 0, "max_tokens": 200}` |
+
+```jsonl
+{"name": "capital", "prompt": "Capital of France? One word.", "expected_pattern": "^\\W*paris\\W*$"}
+{"name": "extract-person", "prompt": "Extract: Bob is 34.", "expected_json_schema": {"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}, "required": ["name", "age"]}, "expected_json": {"name": "Bob", "age": 34}}
+{"name": "weather-tool", "prompt": "Weather in Oslo?", "expected_tool_call": "get_weather", "tools": [{"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}}]}
+```
+
+A schema on its own mostly shows that the backend enforced the format. Add `expected_json` to check the model actually extracted the right values. Suites are validated when loaded, so a malformed line or an invalid schema fails before any model runs, naming the file and line.
+
 ## 3. Context Retrieval ("Needle In A Haystack")
 
 Stress-test context length retrieval by hiding a secret code at 0%, 25%, 50%, 75%, and 100% depths:

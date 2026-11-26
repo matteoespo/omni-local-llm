@@ -24,6 +24,7 @@ from omnillm.core.types import (
     EmbeddingResponse,
     FinishReason,
     ModelSource,
+    RuntimeOptions,
     Usage,
 )
 
@@ -45,6 +46,10 @@ except ImportError:  # Installed with the ollama client.
     pass
 else:
     httpx = httpx_module
+
+
+#: `num_gpu` sent for "offload every layer": more layers than any model has (the usual Ollama idiom for "all").
+ALL_GPU_LAYERS = 999
 
 
 def _value(value: Any, key: str, default: Any = None) -> Any:
@@ -149,7 +154,21 @@ class OllamaAdapter(LLMBackend):
         self._known_models.add(model_name)
 
     @staticmethod
-    def _chat_kwargs(request: ChatRequest) -> dict[str, Any]:
+    def _runtime_options(runtime: RuntimeOptions) -> dict[str, Any]:
+        """Maps llama.cpp-style runtime options to Ollama's: `n_ctx` -> `num_ctx`, `n_gpu_layers` -> `num_gpu`.
+
+        A negative `n_gpu_layers` means "all layers" (as in llama.cpp), but Ollama reads a negative `num_gpu`
+        as "decide automatically", so it is sent as a count larger than any model's layer count instead.
+        """
+        options: dict[str, Any] = {}
+        if runtime.n_ctx is not None:
+            options["num_ctx"] = runtime.n_ctx
+        if runtime.n_gpu_layers is not None:
+            options["num_gpu"] = ALL_GPU_LAYERS if runtime.n_gpu_layers < 0 else runtime.n_gpu_layers
+        return options
+
+    @classmethod
+    def _chat_kwargs(cls, request: ChatRequest) -> dict[str, Any]:
         options = {
             key: value
             for key, value in {
@@ -161,6 +180,7 @@ class OllamaAdapter(LLMBackend):
             }.items()
             if value is not None
         }
+        options.update(cls._runtime_options(request.runtime))
         kwargs: dict[str, Any] = {
             "model": request.model,
             "messages": normalize_messages_for_ollama(request.messages),
@@ -253,6 +273,12 @@ class OllamaAdapter(LLMBackend):
         return self._astream(first, iterator)
 
     @classmethod
+    def _embed_options(cls, request: EmbeddingRequest) -> dict[str, Any]:
+        """Extra keyword arguments for the embed calls (none when no runtime options are set)."""
+        options = cls._runtime_options(request.runtime)
+        return {"options": options} if options else {}
+
+    @classmethod
     def _embedding_response(cls, request: EmbeddingRequest, raw_response: Any) -> EmbeddingResponse:
         embeddings = _value(raw_response, "embeddings", []) or []
         data = [EmbeddingData(index=idx, embedding=tuple(emb)) for idx, emb in enumerate(embeddings)]
@@ -267,12 +293,13 @@ class OllamaAdapter(LLMBackend):
     def _embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         self.pull_model(request.model, request.model_source)
         client = self._require_client()
+        options = self._embed_options(request)
         if hasattr(client, "embed"):
-            response = client.embed(model=request.model, input=list(request.input))
+            response = client.embed(model=request.model, input=list(request.input), **options)
             return self._embedding_response(request, response)
         embeddings: list[Sequence[float]] = []
         for text in request.input:
-            res = client.embeddings(model=request.model, prompt=text)
+            res = client.embeddings(model=request.model, prompt=text, **options)
             embeddings.append(_value(res, "embedding", []))
         return self._embedding_response(request, {"embeddings": embeddings})
 
@@ -283,12 +310,13 @@ class OllamaAdapter(LLMBackend):
     async def _aembed(self, request: EmbeddingRequest) -> EmbeddingResponse:
         await asyncio.to_thread(self.pull_model, request.model, request.model_source)
         client = self._make_async_client()
+        options = self._embed_options(request)
         if hasattr(client, "embed"):
-            response = await client.embed(model=request.model, input=list(request.input))
+            response = await client.embed(model=request.model, input=list(request.input), **options)
             return self._embedding_response(request, response)
         embeddings: list[Sequence[float]] = []
         for text in request.input:
-            res = await client.embeddings(model=request.model, prompt=text)
+            res = await client.embeddings(model=request.model, prompt=text, **options)
             embeddings.append(_value(res, "embedding", []))
         return self._embedding_response(request, {"embeddings": embeddings})
 

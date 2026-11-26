@@ -104,7 +104,7 @@ Also streaming (sync and async), chat sessions with context-window pruning, visi
 
 ```bash
 omnillm bench --targets coder,ollama/llama3.2:3b     # time to first token, tokens/sec
-omnillm eval --model coder --suite my_tests.jsonl    # regex, JSON-schema and tool-call checks
+omnillm eval --model coder --suite my_tests.jsonl    # regex, JSON Schema, JSON value and tool-call checks
 omnillm eval --model coder --needle                  # needle-in-a-haystack retrieval
 ```
 
@@ -128,6 +128,7 @@ pip install "omni-local-llm[ollama,server]"   # or: uv pip install ...
 | `llama-cpp` | In-process llama.cpp backend and `fit --pull` (Hugging Face downloads) |
 | `openai` | OpenAI-compatible servers (just `httpx`) |
 | `server` | `omnillm serve` (FastAPI) |
+| `eval` | JSON Schema checks in `omnillm eval` suites (`jsonschema`) |
 | `all` | Everything |
 
 The core package depends only on `httpx`, and `fit` works without any extras. Requires Python 3.12+.
