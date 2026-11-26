@@ -33,6 +33,8 @@ omnillm eval --backend ollama --model llama3 --needle
 
 # 6. Start the OpenAI-compatible FastAPI server
 omnillm serve --host 127.0.0.1 --port 8000
+OMNILLM_API_KEY=... omnillm serve --host 0.0.0.0 --allowed-host gpu-box   # require a bearer token
+omnillm serve --api-key-file ./key --allow-downloads   # key from a file; let requests download models
 
 # 7. Hardware auto-detection and smart fit quantization recommender
 omnillm fit

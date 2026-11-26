@@ -7,11 +7,19 @@ from omnillm import ChatChunk, ChatResponse, LocalLLMManager, Usage
 from omnillm.core.errors import (
     BackendUnavailableError,
     InvalidRequestError,
+    ModelNotDownloadedError,
     ModelNotFoundError,
     UnsupportedFeatureError,
 )
 from omnillm.server import create_app
 from tests.fakes import RecordingBackend
+
+
+@pytest.fixture(autouse=True)
+def _no_server_env(monkeypatch):
+    """Keeps a developer's own server settings from leaking into these tests."""
+    for name in ("OMNILLM_API_KEY", "OMNILLM_ALLOW_DOWNLOADS", "OMNILLM_ALLOWED_HOSTS"):
+        monkeypatch.delenv(name, raising=False)
 
 
 def local_client(app) -> TestClient:
@@ -364,6 +372,7 @@ SECRET = "Traceback (most recent call last): File /srv/internal/secret.py"
     [
         (InvalidRequestError(SECRET), 400, "invalid_request", "backend rejected the request"),
         (ModelNotFoundError(SECRET), 404, "model_not_found", "not found on its backend"),
+        (ModelNotDownloadedError(SECRET), 404, "model_not_downloaded", "--allow-downloads"),
         (UnsupportedFeatureError(SECRET, feature="tools"), 400, "unsupported_feature", "tool calling"),
         (UnsupportedFeatureError(SECRET, feature="new-thing"), 400, "unsupported_feature", "a feature used"),
         (BackendUnavailableError(SECRET), 503, "backend_unavailable", "currently unavailable"),
@@ -455,3 +464,111 @@ def test_logged_error_text_cannot_forge_log_lines(caplog):
     record = next(r for r in caplog.records if r.name == "omnillm.server")
     assert "\n" not in record.getMessage() and "\r" not in record.getMessage()
     assert "forged entry" in record.getMessage()
+
+
+CHAT = {"model": "fake/m", "messages": [{"role": "user", "content": "x"}]}
+
+
+def test_api_key_is_required_on_every_endpoint_except_health(monkeypatch):
+    monkeypatch.delenv("OMNILLM_API_KEY", raising=False)
+    client = local_client(create_app(LocalLLMManager({"fake": RecordingBackend(models=["m"])}), api_key="s3cret"))
+
+    for headers in (
+        {},
+        {"Authorization": "Bearer wrong"},
+        {"Authorization": "s3cret"},
+        {"Authorization": "Basic s3cret"},
+    ):
+        for response in (
+            client.get("/v1/models", headers=headers),
+            client.post("/v1/chat/completions", json=CHAT, headers=headers),
+            client.post("/v1/embeddings", json={"model": "fake/m", "input": "x"}, headers=headers),
+            client.get("/openapi.json", headers=headers),
+        ):
+            assert response.status_code == 401, (headers, response.request.url)
+            assert response.headers["www-authenticate"] == "Bearer"
+            assert response.json()["error"]["code"] == "invalid_api_key"
+
+    authorized = {"Authorization": "Bearer s3cret"}
+    assert client.get("/v1/models", headers=authorized).status_code == 200
+    assert client.get("/v1/models", headers={"Authorization": "bearer s3cret"}).status_code == 200
+    assert client.post("/v1/chat/completions", json=CHAT, headers=authorized).status_code == 200
+    assert client.get("/health").status_code == 200  # container health checks need no key
+
+
+def test_api_key_works_with_the_openai_sdk_header_and_env(monkeypatch):
+    manager = LocalLLMManager({"fake": RecordingBackend(models=["m"])})
+    monkeypatch.setenv("OMNILLM_API_KEY", " from-env ")
+
+    client = local_client(create_app(manager))
+    assert client.get("/v1/models").status_code == 401
+    assert client.get("/v1/models", headers={"Authorization": "Bearer from-env"}).status_code == 200
+
+    assert local_client(create_app(manager, api_key="")).get("/v1/models").status_code == 200  # explicit opt-out
+
+
+def test_host_check_runs_before_the_api_key_check():
+    app = create_app(LocalLLMManager({"fake": RecordingBackend()}), api_key="k")
+
+    response = TestClient(app, base_url="http://attacker.example").get(
+        "/v1/models", headers={"Authorization": "Bearer k"}
+    )
+
+    assert response.status_code == 400 and response.text == "Invalid host header"
+
+
+def test_api_requests_never_download_models_by_default(monkeypatch):
+    monkeypatch.delenv("OMNILLM_ALLOW_DOWNLOADS", raising=False)
+    backend = RecordingBackend()
+    manager = LocalLLMManager({"fake": backend})
+    manager.register_alias("coder", backend="fake", model="m", filename="m.gguf", local_files_only=False)
+    client = local_client(create_app(manager))
+
+    client.post("/v1/chat/completions", json={**CHAT, "model": "coder"})
+    client.post("/v1/chat/completions", json={**CHAT, "stream": True})
+    client.post("/v1/embeddings", json={"model": "coder", "input": "x"})
+
+    sources = [r.model_source for r in backend.requests] + [r.model_source for r in backend.embedding_requests]
+    assert len(sources) == 3
+    assert all(source.local_files_only for source in sources)  # even over an alias that allows downloads
+
+
+@pytest.mark.parametrize(
+    ("allow_downloads", "env", "expected"),
+    [(True, None, False), (None, "1", False), (None, "true", False), (None, "0", True), (False, "1", True)],
+)
+def test_downloads_can_be_allowed_explicitly(monkeypatch, allow_downloads, env, expected):
+    monkeypatch.delenv("OMNILLM_ALLOW_DOWNLOADS", raising=False)
+    if env is not None:
+        monkeypatch.setenv("OMNILLM_ALLOW_DOWNLOADS", env)
+    backend = RecordingBackend()
+    client = local_client(create_app(LocalLLMManager({"fake": backend}), allow_downloads=allow_downloads))
+
+    client.post("/v1/chat/completions", json=CHAT)
+
+    assert backend.requests[0].model_source.local_files_only is expected
+
+
+def test_missing_ollama_model_is_reported_instead_of_pulled():
+    from omnillm.adapters.ollama_adapter import OllamaAdapter
+
+    class Client:
+        class ResponseError(Exception):
+            status_code = 404
+
+        pulled: list[str] = []
+
+        def show(self, model):
+            raise self.ResponseError()
+
+        def pull(self, model):
+            self.pulled.append(model)
+
+    client = Client()
+    app = create_app(LocalLLMManager({"ollama": OllamaAdapter(client=client, async_client_factory=lambda: client)}))
+
+    response = local_client(app).post("/v1/chat/completions", json={**CHAT, "model": "ollama/huge:405b"})
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "model_not_downloaded"
+    assert client.pulled == []

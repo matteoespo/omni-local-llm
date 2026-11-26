@@ -66,6 +66,20 @@ docker run -d \
 
 The container runs by default as the non-root user `omnillm` (UID 1000) and launches `omnillm serve --host 0.0.0.0 --port 8000`.
 
+### API Key and Model Downloads
+
+Pass `OMNILLM_API_KEY` to require a bearer token on every endpoint except `/health` (so the container health check keeps working):
+
+```bash
+docker run -d \
+  --name omnillm \
+  -p 127.0.0.1:8000:8000 \
+  -e OMNILLM_API_KEY="$(openssl rand -hex 32)" \
+  omnillm
+```
+
+API requests never download models by default: pull them into Ollama first (as in the quick start), pre-download GGUF files into the `/data/huggingface` volume, or set `OMNILLM_ALLOW_DOWNLOADS=1`. See [Access control](server.md#access-control).
+
 ### Health Check
 
 The server exposes `GET /health`, which returns `{"status":"ok"}` immediately without querying any upstream model backends.
@@ -175,7 +189,8 @@ docker run -d \
    - Always bind port forwarding to loopback (`127.0.0.1:8000:8000`) rather than `0.0.0.0:8000` to prevent exposure to the local network.
    - If placing the container behind a reverse proxy (e.g., Nginx, Caddy, or Traefik), configure the exact hostnames via `OMNILLM_ALLOWED_HOSTS` or pass `--allowed-host <domain>`.
 3. **Safe Media Handling**: OmniLLM rejects local file paths and remote URLs in vision requests to ensure clients cannot force the server to read host files or make arbitrary network requests.
-4. **No Built-in Authentication**: OmniLLM currently has no built-in API authentication (no API keys or tokens). Do not expose the server to untrusted networks or bind its port to `0.0.0.0`. Keep the recommended `127.0.0.1:8000:8000` binding so only the local host can access the API. If remote access is needed, place the container behind an authenticating reverse proxy (such as Nginx, Caddy, or Traefik with HTTP Basic Auth, bearer tokens, or mTLS) and specify allowed host headers using `OMNILLM_ALLOWED_HOSTS` or `--allowed-host`.
+4. **API Key**: set `OMNILLM_API_KEY` before publishing the port beyond `127.0.0.1`. Without it, anyone who can reach the port can use your models. The key isn't encrypted in transit, so for remote access also put the container behind a reverse proxy that terminates TLS (such as Nginx, Caddy, or Traefik), and list its host names in `OMNILLM_ALLOWED_HOSTS` or with `--allowed-host`.
+5. **No Downloads from API Requests**: clients can only use models already on the server, so they can't fill the disk or make the server fetch and load arbitrary model files. Only set `OMNILLM_ALLOW_DOWNLOADS=1` if you trust every client.
 
 ## Future GPU Support
 

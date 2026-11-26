@@ -10,6 +10,25 @@ omnillm serve
 
 For containerized deployment with Docker or Docker Compose, see the [Docker deployment guide](docker.md).
 
+## Access control
+
+### API key
+
+Set `OMNILLM_API_KEY` (or pass `--api-key-file PATH`, which keeps the key out of your shell history and `ps`) and every endpoint except `GET /health` requires it as a bearer token, which is what the OpenAI SDKs and most OpenAI-compatible apps send:
+
+```bash
+export OMNILLM_API_KEY="$(openssl rand -hex 32)"
+omnillm serve --host 0.0.0.0 --allowed-host gpu-box
+```
+
+Requests without the right `Authorization: Bearer <key>` header get a `401` with `"code": "invalid_api_key"`. Without a key the server is open to anyone who can reach its port, so `omnillm serve` warns when you bind to a non-loopback address without one. A key doesn't encrypt traffic: across machines you don't trust, put the server behind a reverse proxy that terminates TLS.
+
+### Model downloads
+
+API requests can only use models that are already on the server: installed in Ollama, or GGUF files already in the Hugging Face cache. A request for anything else gets a `404` with `"code": "model_not_downloaded"` instead of making the server pull it. This stops clients from filling the disk with multi-gigabyte downloads, or making the server fetch and load arbitrary model files.
+
+Download models on the server ahead of time (`ollama pull llama3.2:3b`, `omnillm fit <repo> --pull --save-alias <name>`, or one `omnillm run --model <alias> "hi"`), or let requests download them with `omnillm serve --allow-downloads` (or `OMNILLM_ALLOW_DOWNLOADS=1`). The CLI and Python SDK still download on first use as before.
+
 ## Use with the OpenAI SDK
 
 ```python
@@ -17,7 +36,7 @@ import openai
 
 client = openai.OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="not-needed"
+    api_key="not-needed",  # or your OMNILLM_API_KEY, if the server has one
 )
 
 # Chat completions
@@ -73,12 +92,12 @@ print(embedding_res.data[0].embedding)
 - **Host check (DNS-rebinding protection)**: only requests whose `Host` header is a loopback name are accepted by default, so a malicious web page can't reach your local server through DNS rebinding. When serving other machines, list the names clients use: `omnillm serve --host 0.0.0.0 --allowed-host gpu-box --allowed-host 192.168.1.20` (or set `OMNILLM_ALLOWED_HOSTS`; `'*'` disables the check, e.g. behind a reverse proxy).
 - **Health check**: `GET /health` returns `{"status": "ok"}` without querying model backends, making it suitable for container orchestration and uptime monitors.
 - **Docker**: For running inside a container, see [Docker deployment](docker.md).
-- There is no authentication yet: don't expose the server to untrusted networks.
+- **Access control**: see [API key](#api-key) and [Model downloads](#model-downloads) above. Don't expose the server beyond your machine without an API key.
 
 ## Use with curl
 
 ```bash
-# Chat completions
+# Chat completions (add -H "Authorization: Bearer $OMNILLM_API_KEY" if the server has a key)
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
