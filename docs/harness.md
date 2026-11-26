@@ -78,6 +78,10 @@ results.print_table()
 
 A schema on its own mostly shows that the backend enforced the format. Add `expected_json` to check the model actually extracted the right values. Suites are validated when loaded, so a malformed line or an invalid schema fails before any model runs, naming the file and line.
 
+### Picking a model with your suite
+
+`omnillm pick --suite my_tasks.jsonl` runs a suite (plus a short benchmark) on every installed model that fits, and recommends one. See [pick.md](pick.md); from Python, use `PickHarness`.
+
 ## 3. Context Retrieval ("Needle In A Haystack")
 
 Stress-test context length retrieval by hiding a secret code at 0%, 25%, 50%, 75%, and 100% depths:

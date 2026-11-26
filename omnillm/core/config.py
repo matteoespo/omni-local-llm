@@ -28,7 +28,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from omnillm.core.errors import BackendUnavailableError, OmniLLMError
+from omnillm.core.errors import BackendUnavailableError, InvalidRequestError, OmniLLMError
 from omnillm.core.types import BackendCapabilities
 
 if TYPE_CHECKING:
@@ -307,3 +307,68 @@ def apply_config(manager: "LocalLLMManager", config: OmniConfig) -> None:
         manager.register_alias(
             alias.name, model=alias.model, backend=alias.backend, fallbacks=alias.fallbacks, **alias.options
         )
+
+
+_BARE_KEY_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+
+
+def _toml_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t")
+    return f'"{escaped}"'
+
+
+def toml_key(name: str) -> str:
+    """`name` as a TOML key: bare when possible, quoted otherwise (so ``a.b`` isn't read as a nested table)."""
+    return name if name and set(name) <= _BARE_KEY_CHARS else _toml_string(name)
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return repr(value)
+    if isinstance(value, str):
+        return _toml_string(value)
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise TypeError(f"Cannot write {type(value).__name__} values to omnillm.toml.")
+
+
+def alias_table(name: str, model: str, *, backend: str | None = None, options: Mapping[str, Any] | None = None) -> str:
+    """The ``[models.<name>]`` TOML table for an alias."""
+    lines = [f"[models.{toml_key(name)}]"]
+    if backend is not None:
+        lines.append(f"backend = {_toml_string(backend)}")
+    lines.append(f"model = {_toml_string(model)}")
+    lines.extend(f"{key} = {_toml_value(value)}" for key, value in (options or {}).items() if value is not None)
+    return "\n".join(lines)
+
+
+def append_alias(config_path: str | Path, table: str, name: str) -> Path:
+    """Appends an alias table to a config file (created if missing), validating before and after.
+
+    Raises `InvalidRequestError` for a bad or existing name, and restores the file (raising `ConfigError`) if
+    the result doesn't load.
+    """
+    if not name or "/" in name:
+        raise InvalidRequestError("Alias names must be non-empty and must not contain '/'.")
+    path = Path(config_path).expanduser()
+    original: str | None = None
+    if path.exists():
+        existing = load_config(path)
+        if any(alias.name == name for alias in existing.aliases):
+            raise InvalidRequestError(f"Alias '{name}' already exists in {path}.")
+        original = path.read_text()
+        content = original.rstrip("\n") + "\n\n" + table + "\n"
+    else:
+        content = table + "\n"
+    path.write_text(content)
+    try:
+        load_config(path)
+    except ConfigError:
+        if original is None:
+            path.unlink()
+        else:
+            path.write_text(original)
+        raise
+    return path

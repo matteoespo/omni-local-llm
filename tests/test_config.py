@@ -179,3 +179,19 @@ def test_from_config_without_any_file_is_a_default_manager(tmp_path: Path, monke
 
     assert manager.backend_names == ("ollama", "llama.cpp")
     assert manager.alias_names == ()
+
+
+def test_alias_table_round_trips_through_toml(tmp_path: Path):
+    from omnillm.core.config import alias_table, append_alias
+
+    table = alias_table(
+        "my.model",
+        'org/"quoted"\\name',
+        backend="ollama",
+        options={"stop": ["</s>", "\n"], "local_files_only": True, "temperature": 0.2, "n_ctx": 4096, "seed": None},
+    )
+    assert table.startswith('[models."my.model"]')  # a dotted name stays one key, not a nested table
+    path = append_alias(tmp_path / "omnillm.toml", table, "my.model")
+    [alias] = load_config(path).aliases
+    assert (alias.name, alias.backend, alias.model) == ("my.model", "ollama", 'org/"quoted"\\name')
+    assert dict(alias.options) == {"stop": ["</s>", "\n"], "local_files_only": True, "temperature": 0.2, "n_ctx": 4096}

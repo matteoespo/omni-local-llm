@@ -1,6 +1,6 @@
 # Interactive CLI
 
-Omni-Local-LLM provides a first-class command-line binary `omnillm` for interactive chat, one-shot prompt execution, model inspection, benchmarking, and serving:
+Omni-Local-LLM provides a first-class command-line binary `omnillm` for interactive chat, one-shot prompt execution, model inspection, benchmarking, model selection, and serving:
 
 ```bash
 # Try without installing (uv): uvx omni-local-llm <command> ...
@@ -41,7 +41,14 @@ omnillm fit
 omnillm fit unsloth/Qwen3-8B-GGUF --context 8192          # exact: real files + GGUF header
 omnillm fit unsloth/Qwen3-8B-GGUF --pull                  # ...and download the recommended quant
 omnillm fit llama3.2:3b --json                            # installed Ollama model
+
+# 8. Pick the best installed model for your own tasks (fit + eval suite + benchmark)
+omnillm pick --suite docs/examples/tasks.jsonl --dry-run  # which candidates fit, measure nothing
+omnillm pick --suite my_tasks.jsonl --prefer quality --save-alias best
+omnillm pick --suite my_tasks.jsonl --models coder,ollama/qwen2.5:7b --context 8192 --json
 ```
+
+`pick` is documented in [pick.md](pick.md).
 
 ---
 
